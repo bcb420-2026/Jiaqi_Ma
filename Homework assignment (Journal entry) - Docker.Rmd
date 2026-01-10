@@ -1,0 +1,39 @@
+---
+title: "Gene Expression Matrix Practice"
+output: html_notebook
+---
+
+```{r}
+# Set a "seed" so we get the same random numbers every time we run this
+set.seed(42) 
+
+# Create the data
+# sample(1:100, 50) picks 50 random numbers between 1 and 100
+expression_data <- matrix(sample(1:100, 50), nrow = 5, ncol = 10)
+
+# Define the column names
+colnames(expression_data) <- c("cond1", "cond2", "cond3", "cond4", "cond5", 
+                               "ctrl1", "ctrl2", "ctrl3", "ctrl4", "ctrl5")
+
+# Define the row names
+rownames(expression_data) <- c("gene1", "gene2", "gene3", "gene4", "gene5")
+
+# 1. Calculate the average of the 5 condition columns (Columns 1 to 5)
+# rowMeans() calculates the average for every row automatically
+cond_means <- rowMeans(expression_data[, 1:5])
+
+# 2. Calculate the average of the 5 control columns (Columns 6 to 10)
+ctrl_means <- rowMeans(expression_data[, 6:10])
+
+# 3. Calculate Fold Change
+fold_change <- cond_means / ctrl_means
+
+# Create a clean results table
+results <- data.frame(
+  Condition_Avg = cond_means,
+  Control_Avg = ctrl_means,
+  Fold_Change = fold_change
+)
+
+# Display the final results
+print(results)
