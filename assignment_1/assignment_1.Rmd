@@ -1,0 +1,15 @@
+---
+title: "Assignment #1"
+author: "Jiaqi Ma"
+date: "2026-02-06"
+output:
+  html_document:
+    toc: true                   # this is to generate a table of contents
+    toc_depth: 2                # this is to control what level of header we are going to display on the table of contents 
+    toc_float: true             #this is to have a floating table of contents
+    code_folding: none          # this is to fold/hide the code 
+bibliography: BCB420.bib        # this is for the citations/bibliography 
+link-citations: true            # this is for the citations/bibliography
+---
+
+# Data Download
