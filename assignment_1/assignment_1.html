@@ -1489,7 +1489,9 @@ border-radius: 0px;
 <div id="data-download" class="section level1">
 <h1>Data Download</h1>
 <hr />
-<p>My choice of dataset is <code>GSE209552</code>.</p>
+<ul>
+<li>My choice of dataset is <code>GSE209552</code>.</li>
+</ul>
 <pre class="r"><code># Define global constant
 GSE_NUM &lt;- &quot;GSE209552&quot;</code></pre>
 <div id="geometadb-setup" class="section level2">
@@ -1621,6 +1623,154 @@ print(paste(&quot;Found&quot;, length(sc_gsm_list), &quot;scRNA-seq samples.&quo
 ##  [6] &quot;GSM6376811&quot; &quot;GSM6376812&quot; &quot;GSM6376813&quot; &quot;GSM6376814&quot; &quot;GSM6376815&quot;
 ## [11] &quot;GSM6376816&quot; &quot;GSM6376817&quot; &quot;GSM6376818&quot; &quot;GSM6376819&quot; &quot;GSM6376820&quot;
 ## [16] &quot;GSM6376821&quot; &quot;GSM6376822&quot;</code></pre>
+</div>
+</div>
+<div id="access-data-quality" class="section level1">
+<h1>Access data quality</h1>
+<ul>
+<li>The following analysis is build on <a href="https://satijalab.org/seurat/">Seurat</a> framework and referring
+<a href="https://doi.org/10.1038/s41576-023-00586-w">Heumos et al,
+2023</a> for high-level idea.</li>
+</ul>
+<pre class="r"><code># Install Seurat if not
+if (!requireNamespace(&quot;Seurat&quot;, quietly = TRUE))
+  install.packages(&quot;Seurat&quot;)</code></pre>
+<div id="reorganize-scrna-seq-files" class="section level2">
+<h2>Reorganize scRNA-seq files</h2>
+<pre class="r"><code># Attach packages
+library(Seurat)</code></pre>
+<pre><code>## Loading required package: SeuratObject</code></pre>
+<pre><code>## Loading required package: sp</code></pre>
+<pre><code>## &#39;SeuratObject&#39; was built under R 4.5.0 but the current version is
+## 4.5.2; it is recomended that you reinstall &#39;SeuratObject&#39; as the ABI
+## for R may have changed</code></pre>
+<pre><code>## 
+## Attaching package: &#39;SeuratObject&#39;</code></pre>
+<pre><code>## The following objects are masked from &#39;package:base&#39;:
+## 
+##     intersect, t</code></pre>
+<pre class="r"><code>library(data.table)
+library(Matrix)
+library(dplyr)</code></pre>
+<pre><code>## 
+## Attaching package: &#39;dplyr&#39;</code></pre>
+<pre><code>## The following objects are masked from &#39;package:data.table&#39;:
+## 
+##     between, first, last</code></pre>
+<pre><code>## The following objects are masked from &#39;package:stats&#39;:
+## 
+##     filter, lag</code></pre>
+<pre><code>## The following objects are masked from &#39;package:base&#39;:
+## 
+##     intersect, setdiff, setequal, union</code></pre>
+<pre class="r"><code>library(stringr)
+
+# Define data paths
+tar_file &lt;- &quot;data/GSE209552/GSE209552_RAW.tar&quot;
+extract_dir &lt;- &quot;data/GSE209552/raw_files&quot;
+
+# Define unpack helper function
+unpack_geo_tar &lt;- function(tar_path, dest_dir) {
+  if (dir.exists(dest_dir) &amp;&amp; length(list.files(dest_dir)) &gt; 0) {
+    message(paste(&quot;📂 Extracted files found at&quot;, dest_dir, &quot;- Skipping unpack.&quot;))
+    return(invisible(dest_dir))
+  }
+  if (!file.exists(tar_path)) {
+    stop(paste(&quot;❌ Tar file not found:&quot;, tar_path))
+  }
+  message(paste(&quot;📦 Unpacking&quot;, basename(tar_path), &quot;...&quot;))
+  dir.create(dest_dir, showWarnings = FALSE, recursive = TRUE)
+  untar(tar_path, exdir = dest_dir)
+  message(&quot;✅ Unpacking complete.&quot;)
+  return(invisible(dest_dir))
+}
+
+# Run the unpacker
+unpack_geo_tar(tar_file, extract_dir)</code></pre>
+<pre><code>## 📂 Extracted files found at data/GSE209552/raw_files - Skipping unpack.</code></pre>
+<pre class="r"><code># Reorganize all scRNA-seq 10x files in to a new directory
+dest_dir    &lt;- &quot;data/GSE209552/10x_organized&quot;    # Where they should go
+dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- MAIN LOOP ---
+message(paste(&quot;🚀 Organizing files for&quot;, length(sc_gsm_list), &quot;samples...&quot;))</code></pre>
+<pre><code>## 🚀 Organizing files for 17 samples...</code></pre>
+<pre class="r"><code>skipped_count &lt;- 0
+moved_count   &lt;- 0
+
+for (gsm in sc_gsm_list) {
+  
+  # 1. Define the specific destination path for this sample
+  sample_subdir &lt;- file.path(dest_dir, gsm)
+  
+  # 2. CHECK: Does it already exist?
+  if (dir.exists(sample_subdir) &amp;&amp; length(list.files(sample_subdir)) &gt;= 3) {
+    skipped_count &lt;- skipped_count + 1
+    next
+  }
+  
+  # 3. Create directory
+  dir.create(sample_subdir, showWarnings = FALSE)
+  
+  # 4. Find source files (Exclude the &#39;TE&#39; files)
+  pattern &lt;- paste0(&quot;^&quot;, gsm)
+  files_to_move &lt;- list.files(extract_dir, pattern = pattern, full.names = TRUE)
+  files_to_move &lt;- files_to_move[!grepl(&quot;_TE_&quot;, files_to_move)]
+  
+  # Safety Checks
+  if (length(files_to_move) == 0) {
+    warning(paste(&quot;⚠️ Skipping&quot;, gsm, &quot;- No source files found.&quot;))
+    next
+  }
+  
+  # 5. MOVE &amp; RENAME (The Standardize Step)
+  # We identify specific files to ensure we rename them correctly for Seurat
+  
+  f_matrix   &lt;- files_to_move[grep(&quot;matrix&quot;, files_to_move, ignore.case = TRUE)]
+  f_barcodes &lt;- files_to_move[grep(&quot;barcodes&quot;, files_to_move, ignore.case = TRUE)]
+  f_features &lt;- files_to_move[grep(&quot;features|genes&quot;, files_to_move, ignore.case = TRUE)]
+  
+  # Verify we found exactly 1 of each before moving
+  if (length(f_matrix) == 1 &amp;&amp; length(f_barcodes) == 1 &amp;&amp; length(f_features) == 1) {
+    
+    # Rename Matrix -&gt; matrix.mtx.gz
+    file.rename(f_matrix, file.path(sample_subdir, &quot;matrix.mtx.gz&quot;))
+    
+    # Rename Barcodes -&gt; barcodes.tsv.gz
+    file.rename(f_barcodes, file.path(sample_subdir, &quot;barcodes.tsv.gz&quot;))
+    
+    # Rename Genes/Features -&gt; features.tsv.gz
+    # (Note: Seurat prefers &#39;features.tsv&#39; over &#39;genes.tsv&#39;)
+    file.rename(f_features, file.path(sample_subdir, &quot;features.tsv.gz&quot;))
+    
+    message(paste(&quot;  ✅ Standardized &amp; Moved:&quot;, gsm))
+    moved_count &lt;- moved_count + 1
+    
+  } else {
+    warning(paste(&quot;  ⚠️ Skipping&quot;, gsm, &quot;- Could not find unique 10x triplet to standardize.&quot;))
+  }
+}
+
+# --- SUMMARY ---
+message(&quot;🎉 Organization Complete.&quot;)</code></pre>
+<pre><code>## 🎉 Organization Complete.</code></pre>
+<pre class="r"><code>message(paste(&quot;  🔹 Samples moved &amp; standardized:&quot;, moved_count))</code></pre>
+<pre><code>##   🔹 Samples moved &amp; standardized: 0</code></pre>
+<pre class="r"><code>message(paste(&quot;  🔸 Samples skipped (already done):&quot;, skipped_count))</code></pre>
+<pre><code>##   🔸 Samples skipped (already done): 17</code></pre>
+</div>
+<div id="load-scrna-seq-files-into-r-using-seurat" class="section level2">
+<h2>Load scRNA-seq files into R using Seurat</h2>
+</div>
+<div id="data-exploriation" class="section level2">
+<h2>Data exploriation</h2>
+<p>Plot the following statistics:</p>
+<ul>
+<li>Number of unique identifier among cells (infer coverage)</li>
+<li>Number of total identifier among cells (infer depth)</li>
+<li>Number of samples and cells in control group</li>
+<li>Number of samples and cells in treatment group</li>
+</ul>
 </div>
 </div>
 

@@ -14,9 +14,9 @@ link-citations: true            # this is for the citations/bibliography
 
 # Data Download
 
-***
+------------------------------------------------------------------------
 
-My choice of dataset is `GSE209552`.
+-   My choice of dataset is `GSE209552`.
 
 ```{r}
 # Define global constant
@@ -90,6 +90,7 @@ This GSE contain both scRNA-seq and bulk RNA-seq sample. Removal of bulk RNA-seq
 Refer to the [original paper](https://doi.org/10.1016/j.celrep.2023.113395)'s method section, only the scRNA-seq was done by `Illumina NextSeq6000` platform, [GPL24676](https://www-ncbi-nlm-nih-gov.myaccess.library.utoronto.ca/geo/query/acc.cgi?acc=GPL24676). We can use this clue to exclude all bulk RNA-seq
 
 Since all GSMs of this study are packed in one `GSE209552_RAW.tar` file in GEO, we can't indicate which platform to include/exclude at download step. Thus we will construct a list of `GPL24676` GSMs for downstream reference by query `GEOmetabd`.
+
 ```{r}
 # Define desired platform
 scRNA_platform <- "GPL24676"    # The scRNA-seq platform (NovaSeq)
@@ -111,5 +112,137 @@ sc_gsm_list <- dbGetQuery(con, sql_filter)$gsm
 # View results
 print(paste("Found", length(sc_gsm_list), "scRNA-seq samples."))
 sc_gsm_list
+```
+
+# Access data quality
+
+-   The following analysis is build on [Seurat](https://satijalab.org/seurat/) framework and referring [Heumos et al, 2023](https://doi.org/10.1038/s41576-023-00586-w) for high-level idea.
+
+```{r}
+# Install Seurat if not
+if (!requireNamespace("Seurat", quietly = TRUE))
+  install.packages("Seurat")
+```
+
+## Reorganize scRNA-seq files
+
+```{r}
+# Attach packages
+library(Seurat)
+library(data.table)
+library(Matrix)
+library(dplyr)
+library(stringr)
+
+# Define data paths
+tar_file <- "data/GSE209552/GSE209552_RAW.tar"
+extract_dir <- "data/GSE209552/raw_files"
+
+# Define unpack helper function
+unpack_geo_tar <- function(tar_path, dest_dir) {
+  if (dir.exists(dest_dir) && length(list.files(dest_dir)) > 0) {
+    message(paste("📂 Extracted files found at", dest_dir, "- Skipping unpack."))
+    return(invisible(dest_dir))
+  }
+  if (!file.exists(tar_path)) {
+    stop(paste("❌ Tar file not found:", tar_path))
+  }
+  message(paste("📦 Unpacking", basename(tar_path), "..."))
+  dir.create(dest_dir, showWarnings = FALSE, recursive = TRUE)
+  untar(tar_path, exdir = dest_dir)
+  message("✅ Unpacking complete.")
+  return(invisible(dest_dir))
+}
+
+# Run the unpacker
+unpack_geo_tar(tar_file, extract_dir)
+
+# Reorganize all scRNA-seq 10x files in to a new directory
+dest_dir    <- "data/GSE209552/10x_organized"    # Where they should go
+dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- MAIN LOOP ---
+message(paste("🚀 Organizing files for", length(sc_gsm_list), "samples..."))
+
+skipped_count <- 0
+moved_count   <- 0
+
+for (gsm in sc_gsm_list) {
+  
+  # 1. Define the specific destination path for this sample
+  sample_subdir <- file.path(dest_dir, gsm)
+  
+  # 2. CHECK: Does it already exist?
+  if (dir.exists(sample_subdir) && length(list.files(sample_subdir)) >= 3) {
+    skipped_count <- skipped_count + 1
+    next
+  }
+  
+  # 3. Create directory
+  dir.create(sample_subdir, showWarnings = FALSE)
+  
+  # 4. Find source files (Exclude the 'TE' files)
+  pattern <- paste0("^", gsm)
+  files_to_move <- list.files(extract_dir, pattern = pattern, full.names = TRUE)
+  files_to_move <- files_to_move[!grepl("_TE_", files_to_move)]
+  
+  # Safety Checks
+  if (length(files_to_move) == 0) {
+    warning(paste("⚠️ Skipping", gsm, "- No source files found."))
+    next
+  }
+  
+  # 5. MOVE & RENAME (The Standardize Step)
+  # We identify specific files to ensure we rename them correctly for Seurat
+  
+  f_matrix   <- files_to_move[grep("matrix", files_to_move, ignore.case = TRUE)]
+  f_barcodes <- files_to_move[grep("barcodes", files_to_move, ignore.case = TRUE)]
+  f_features <- files_to_move[grep("features|genes", files_to_move, ignore.case = TRUE)]
+  
+  # Verify we found exactly 1 of each before moving
+  if (length(f_matrix) == 1 && length(f_barcodes) == 1 && length(f_features) == 1) {
+    
+    # Rename Matrix -> matrix.mtx.gz
+    file.rename(f_matrix, file.path(sample_subdir, "matrix.mtx.gz"))
+    
+    # Rename Barcodes -> barcodes.tsv.gz
+    file.rename(f_barcodes, file.path(sample_subdir, "barcodes.tsv.gz"))
+    
+    # Rename Genes/Features -> features.tsv.gz
+    # (Note: Seurat prefers 'features.tsv' over 'genes.tsv')
+    file.rename(f_features, file.path(sample_subdir, "features.tsv.gz"))
+    
+    message(paste("  ✅ Standardized & Moved:", gsm))
+    moved_count <- moved_count + 1
+    
+  } else {
+    warning(paste("  ⚠️ Skipping", gsm, "- Could not find unique 10x triplet to standardize."))
+  }
+}
+
+# --- SUMMARY ---
+message("🎉 Organization Complete.")
+message(paste("  🔹 Samples moved & standardized:", moved_count))
+message(paste("  🔸 Samples skipped (already done):", skipped_count))
+```
+
+## Load scRNA-seq files into R using Seurat
+
+```{r}
+
+```
+
+
+## Data exploriation
+
+Plot the following statistics:
+
+-   Number of unique identifier among cells (infer coverage)
+-   Number of total identifier among cells (infer depth)
+-   Number of samples and cells in control group
+-   Number of samples and cells in treatment group
+
+```{r}
+
 ```
 
