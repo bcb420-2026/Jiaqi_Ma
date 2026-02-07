@@ -93,7 +93,7 @@ Since all GSMs of this study are packed in one `GSE209552_RAW.tar` file in GEO, 
 
 ```{r}
 # Define desired platform
-scRNA_platform <- "GPL24676"    # The scRNA-seq platform (NovaSeq)
+scRNA_platform <- "GPL24676"
 
 # Construct the query
 # We join the 'link' table (gse_gsm) with the 'sample' table (gsm) 
@@ -158,7 +158,7 @@ unpack_geo_tar <- function(tar_path, dest_dir) {
 unpack_geo_tar(tar_file, extract_dir)
 
 # Reorganize all scRNA-seq 10x files in to a new directory
-dest_dir    <- "data/GSE209552/10x_organized"    # Where they should go
+dest_dir <- "data/GSE209552/10x_organized"    # Where they should go
 dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
 
 # --- MAIN LOOP ---
@@ -194,7 +194,6 @@ for (gsm in sc_gsm_list) {
   
   # 5. MOVE & RENAME (The Standardize Step)
   # We identify specific files to ensure we rename them correctly for Seurat
-  
   f_matrix   <- files_to_move[grep("matrix", files_to_move, ignore.case = TRUE)]
   f_barcodes <- files_to_move[grep("barcodes", files_to_move, ignore.case = TRUE)]
   f_features <- files_to_move[grep("features|genes", files_to_move, ignore.case = TRUE)]
@@ -229,9 +228,33 @@ message(paste("  🔸 Samples skipped (already done):", skipped_count))
 ## Load scRNA-seq files into R using Seurat
 
 ```{r}
+# Get the list of sample subdirectories
+sample_dirs <- list.dirs(dest_dir, recursive = FALSE)
 
+# Define a list storing seurat obj of all GSMs
+seurat_list <- list()
+
+message(paste("🚀 Loading", length(sample_dirs), "samples..."))
+for (dir in sample_dirs) {
+  # Extract GSM ID from the folder name (e.g., "GSM6385438")
+  gsm_id <- basename(dir)
+  
+  # A. Read 10x Data
+  # Because you renamed the files, Read10X finds them automatically!
+  counts <- Read10X(data.dir = dir)
+  
+  # B. Create Seurat Object
+  seurat_list[[gsm_id]] <- CreateSeuratObject(
+    counts = counts, 
+    project = gsm_id, 
+    min.cells = 0, 
+    min.features = 0
+  )
+  
+  message(paste("  ✅ Loaded:", gsm_id))
+}
+length(seurat_list)
 ```
-
 
 ## Data exploriation
 
@@ -243,6 +266,15 @@ Plot the following statistics:
 -   Number of samples and cells in treatment group
 
 ```{r}
+library(ggplot2)
+library(patchwork)
 
+gsm_list_string <- paste(paste0("'", sc_gsm_list, "'"), collapse = ",")
+sql <- paste0(
+  "SELECT gsm, title, characteristics_ch1 ",
+  "FROM gsm ",
+  "WHERE gsm IN (", gsm_list_string, ")"
+)
+metadata <- dbGetQuery(con, sql)
 ```
 
