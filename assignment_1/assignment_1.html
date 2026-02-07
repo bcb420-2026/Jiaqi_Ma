@@ -1599,7 +1599,7 @@ platform to include/exclude at download step. Thus we will construct a
 list of <code>GPL24676</code> GSMs for downstream reference by query
 <code>GEOmetabd</code>.</p>
 <pre class="r"><code># Define desired platform
-scRNA_platform &lt;- &quot;GPL24676&quot;    # The scRNA-seq platform (NovaSeq)
+scRNA_platform &lt;- &quot;GPL24676&quot;
 
 # Construct the query
 # We join the &#39;link&#39; table (gse_gsm) with the &#39;sample&#39; table (gsm) 
@@ -1689,7 +1689,7 @@ unpack_geo_tar &lt;- function(tar_path, dest_dir) {
 unpack_geo_tar(tar_file, extract_dir)</code></pre>
 <pre><code>## 📂 Extracted files found at data/GSE209552/raw_files - Skipping unpack.</code></pre>
 <pre class="r"><code># Reorganize all scRNA-seq 10x files in to a new directory
-dest_dir    &lt;- &quot;data/GSE209552/10x_organized&quot;    # Where they should go
+dest_dir &lt;- &quot;data/GSE209552/10x_organized&quot;    # Where they should go
 dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
 
 # --- MAIN LOOP ---
@@ -1725,7 +1725,6 @@ for (gsm in sc_gsm_list) {
   
   # 5. MOVE &amp; RENAME (The Standardize Step)
   # We identify specific files to ensure we rename them correctly for Seurat
-  
   f_matrix   &lt;- files_to_move[grep(&quot;matrix&quot;, files_to_move, ignore.case = TRUE)]
   f_barcodes &lt;- files_to_move[grep(&quot;barcodes&quot;, files_to_move, ignore.case = TRUE)]
   f_features &lt;- files_to_move[grep(&quot;features|genes&quot;, files_to_move, ignore.case = TRUE)]
@@ -1761,6 +1760,86 @@ message(&quot;🎉 Organization Complete.&quot;)</code></pre>
 </div>
 <div id="load-scrna-seq-files-into-r-using-seurat" class="section level2">
 <h2>Load scRNA-seq files into R using Seurat</h2>
+<pre class="r"><code># Get the list of sample subdirectories
+sample_dirs &lt;- list.dirs(dest_dir, recursive = FALSE)
+
+# Define a list storing seurat obj of all GSMs
+seurat_list &lt;- list()
+
+message(paste(&quot;🚀 Loading&quot;, length(sample_dirs), &quot;samples...&quot;))</code></pre>
+<pre><code>## 🚀 Loading 17 samples...</code></pre>
+<pre class="r"><code>for (dir in sample_dirs) {
+  # Extract GSM ID from the folder name (e.g., &quot;GSM6385438&quot;)
+  gsm_id &lt;- basename(dir)
+  
+  # A. Read 10x Data
+  # Because you renamed the files, Read10X finds them automatically!
+  counts &lt;- Read10X(data.dir = dir)
+  
+  # B. Create Seurat Object
+  seurat_list[[gsm_id]] &lt;- CreateSeuratObject(
+    counts = counts, 
+    project = gsm_id, 
+    min.cells = 0, 
+    min.features = 0
+  )
+  
+  message(paste(&quot;  ✅ Loaded:&quot;, gsm_id))
+}</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376803</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376804</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376805</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376806</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376807</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376811</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376812</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376813</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376814</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376815</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376816</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376817</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376818</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376819</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376820</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376821</code></pre>
+<pre><code>##   ✅ Loaded: GSM6376822</code></pre>
+<pre class="r"><code>length(seurat_list)</code></pre>
+<pre><code>## [1] 17</code></pre>
+<pre class="r"><code># Load GSMs metadata from GEOmetadb
+gsm_list_string &lt;- paste(paste0(&quot;&#39;&quot;, sc_gsm_list, &quot;&#39;&quot;), collapse = &quot;,&quot;)
+sql &lt;- paste0(
+  &quot;SELECT gsm, title, characteristics_ch1 &quot;,
+  &quot;FROM gsm &quot;,
+  &quot;WHERE gsm IN (&quot;, gsm_list_string, &quot;)&quot;
+)
+metadata &lt;- dbGetQuery(con, sql)
+
+# Merge the condition metadata to corresponding Seurat obj&#39;s metadata
+metadata$Condition &lt;- sub(&quot;.*condition:\\s*([^;]+).*&quot;, &quot;\\1&quot;, metadata$characteristics_ch1, ignore.case = TRUE)
+
+# Loop and assign
+for (gsm in names(seurat_list)) {
+  # Find the condition for this GSM
+  val &lt;- metadata$Condition[metadata$gsm == gsm]
+  
+  # Assign to Seurat object (handling missing values)
+  if (length(val) &gt; 0) {
+    seurat_list[[gsm]]$Condition &lt;- val
+  } else {
+    seurat_list[[gsm]]$Condition &lt;- &quot;Unknown&quot;
+  }
+}
+
+# Skipped cause my laptop don&#39;t have enough emeory
+# Final Merge
+# combined_seurat &lt;- merge(
+#   x = seurat_list[[1]], 
+#   y = seurat_list[-1], 
+#   add.cell.ids = names(seurat_list), 
+#   project = &quot;GSE209552&quot;
+# )
+# Verify
+# table(combined_seurat$Condition)</code></pre>
 </div>
 <div id="data-exploriation" class="section level2">
 <h2>Data exploriation</h2>
@@ -1771,6 +1850,8 @@ message(&quot;🎉 Organization Complete.&quot;)</code></pre>
 <li>Number of samples and cells in control group</li>
 <li>Number of samples and cells in treatment group</li>
 </ul>
+<pre class="r"><code>library(ggplot2)
+library(patchwork)</code></pre>
 </div>
 </div>
 

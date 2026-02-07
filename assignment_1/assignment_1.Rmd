@@ -254,6 +254,42 @@ for (dir in sample_dirs) {
   message(paste("  ✅ Loaded:", gsm_id))
 }
 length(seurat_list)
+
+# Load GSMs metadata from GEOmetadb
+gsm_list_string <- paste(paste0("'", sc_gsm_list, "'"), collapse = ",")
+sql <- paste0(
+  "SELECT gsm, title, characteristics_ch1 ",
+  "FROM gsm ",
+  "WHERE gsm IN (", gsm_list_string, ")"
+)
+metadata <- dbGetQuery(con, sql)
+
+# Merge the condition metadata to corresponding Seurat obj's metadata
+metadata$Condition <- sub(".*condition:\\s*([^;]+).*", "\\1", metadata$characteristics_ch1, ignore.case = TRUE)
+
+# Loop and assign
+for (gsm in names(seurat_list)) {
+  # Find the condition for this GSM
+  val <- metadata$Condition[metadata$gsm == gsm]
+  
+  # Assign to Seurat object (handling missing values)
+  if (length(val) > 0) {
+    seurat_list[[gsm]]$Condition <- val
+  } else {
+    seurat_list[[gsm]]$Condition <- "Unknown"
+  }
+}
+
+# Skipped cause my laptop don't have enough emeory
+# Final Merge
+# combined_seurat <- merge(
+#   x = seurat_list[[1]], 
+#   y = seurat_list[-1], 
+#   add.cell.ids = names(seurat_list), 
+#   project = "GSE209552"
+# )
+# Verify
+# table(combined_seurat$Condition)
 ```
 
 ## Data exploriation
@@ -269,12 +305,5 @@ Plot the following statistics:
 library(ggplot2)
 library(patchwork)
 
-gsm_list_string <- paste(paste0("'", sc_gsm_list, "'"), collapse = ",")
-sql <- paste0(
-  "SELECT gsm, title, characteristics_ch1 ",
-  "FROM gsm ",
-  "WHERE gsm IN (", gsm_list_string, ")"
-)
-metadata <- dbGetQuery(con, sql)
 ```
 
