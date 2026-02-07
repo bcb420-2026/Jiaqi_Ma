@@ -13,7 +13,7 @@
 
 <meta name="date" content="2026-02-06" />
 
-<title>R Notebook</title>
+<title>Assignment #1</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -1479,7 +1479,7 @@ border-radius: 0px;
 
 
 
-<h1 class="title toc-ignore">R Notebook</h1>
+<h1 class="title toc-ignore">Assignment #1</h1>
 <h4 class="author">Jiaqi Ma</h4>
 <h4 class="date">2026-02-06</h4>
 
@@ -1488,6 +1488,129 @@ border-radius: 0px;
 
 <div id="data-download" class="section level1">
 <h1>Data Download</h1>
+<p>My choice of dataset is <code>GSE209552</code>.</p>
+<pre class="r"><code># Define global constant
+GSE_NUM &lt;- &quot;GSE209552&quot;</code></pre>
+<p>To setup <a href="https://www.bioconductor.org/packages/release/bioc/html/GEOmetadb.html">GEOmetadb
+Tutorial</a>, follow <a href="https://bcb420-2026.github.io/Exercise_Finding_Expression_data/setting-up-geometadb.html">GEOmetadb
+Tutorial Chapter 3</a></p>
+<pre class="r"><code># Install required package if not installed
+if (!requireNamespace(&quot;BiocManager&quot;, quietly = TRUE))
+  install.packages(&quot;BiocManager&quot;)
+if (!requireNamespace(&quot;GEOmetadb&quot;, quietly = TRUE))
+  BiocManager::install(&quot;GEOmetadb&quot;)
+if (!requireNamespace(&quot;DBI&quot;, quietly = TRUE))
+  install.packages(&quot;DBI&quot;)
+if (!requireNamespace(&quot;RSQLite&quot;, quietly = TRUE))
+  install.packages(&quot;RSQLite&quot;)
+if (!requireNamespace(&quot;dplyr&quot;, quietly = TRUE))
+  install.packages(&quot;dplyr&quot;)
+if (!requireNamespace(&quot;ggplot2&quot;, quietly = TRUE))
+  install.packages(&quot;ggplot2&quot;)
+
+# Attach packages
+library(GEOmetadb)</code></pre>
+<pre><code>## Loading required package: R.utils</code></pre>
+<pre><code>## Loading required package: R.oo</code></pre>
+<pre><code>## Loading required package: R.methodsS3</code></pre>
+<pre><code>## R.methodsS3 v1.8.2 (2022-06-13 22:00:14 UTC) successfully loaded. See ?R.methodsS3 for help.</code></pre>
+<pre><code>## R.oo v1.27.1 (2025-05-02 21:00:05 UTC) successfully loaded. See ?R.oo for help.</code></pre>
+<pre><code>## 
+## Attaching package: &#39;R.oo&#39;</code></pre>
+<pre><code>## The following object is masked from &#39;package:R.methodsS3&#39;:
+## 
+##     throw</code></pre>
+<pre><code>## The following objects are masked from &#39;package:methods&#39;:
+## 
+##     getClasses, getMethods</code></pre>
+<pre><code>## The following objects are masked from &#39;package:base&#39;:
+## 
+##     attach, detach, load, save</code></pre>
+<pre><code>## R.utils v2.13.0 (2025-02-24 21:20:02 UTC) successfully loaded. See ?R.utils for help.</code></pre>
+<pre><code>## 
+## Attaching package: &#39;R.utils&#39;</code></pre>
+<pre><code>## The following object is masked from &#39;package:utils&#39;:
+## 
+##     timestamp</code></pre>
+<pre><code>## The following objects are masked from &#39;package:base&#39;:
+## 
+##     cat, commandArgs, getOption, isOpen, nullfile, parse, use, warnings</code></pre>
+<pre><code>## Loading required package: RSQLite</code></pre>
+<pre class="r"><code>library(DBI)
+library(RSQLite)
+
+# Download SQLite database if not exist
+if (!file.exists(&#39;GEOmetadb.sqlite&#39;)) getSQLiteFile()
+file.info(&#39;GEOmetadb.sqlite&#39;)</code></pre>
+<pre><code>##                         size isdir mode               mtime               ctime
+## GEOmetadb.sqlite 19576775680 FALSE  777 2026-02-02 21:35:25 2026-02-06 22:06:42
+##                                atime  uid  gid   uname  grname
+## GEOmetadb.sqlite 2026-02-05 18:59:19 1000 1000 rstudio rstudio</code></pre>
+<pre class="r"><code># Connect to database
+con &lt;- dbConnect(SQLite(), &#39;GEOmetadb.sqlite&#39;)</code></pre>
+<p>Download data, follow <a href="https://bcb420-2026.github.io/Example_Student/id_mapping/getting-data-from-geo.html">Identifier
+Mapping Tutorial</a>. The helper function defined below is modified
+based on <a href="https://github.com/bcb420-2026/Example_Student/blob/main/in_class_exercises/id_mapping/fetch_geo_supp.R">Identifier
+Mapping Tutorial’s helper function</a> to avoid duplicated download.</p>
+<pre class="r"><code># Define helper function
+fetch_geo_supp &lt;- function(gse, destdir = &quot;data&quot;) {
+  # Calculate the actual path where GEOquery puts the files
+  target_path &lt;- file.path(destdir, gse)
+  
+  # Check if directory exists AND contains files
+  if (dir.exists(target_path) &amp;&amp; length(list.files(target_path)) &gt; 0) {
+    message(paste(&quot;Data found at&quot;, target_path, &quot;- Skipping download.&quot;))
+    return(invisible(target_path))
+  }
+  
+  # If missing or empty, proceed with download
+  message(paste(&quot;Downloading&quot;, gse, &quot;to&quot;, destdir, &quot;...&quot;))
+  dir.create(destdir, showWarnings = FALSE, recursive = TRUE)
+  GEOquery::getGEOSuppFiles(GEO = gse, baseDir = destdir, makeDirectory = TRUE)
+  
+  invisible(target_path)
+}
+
+# Download
+fetch_geo_supp(gse = GSE_NUM)</code></pre>
+<pre><code>## Data found at data/GSE209552 - Skipping download.</code></pre>
+<p>This GSE contain both scRNA-seq and bulk RNA-seq sample. Removal of
+bulk RNA-seq is needed to avoid significant batch effect due to their
+technical difference. Although the number of sample is reduced to 12,
+it’s still sufficient.</p>
+<p>Refer to the <a href="https://doi.org/10.1016/j.celrep.2023.113395">original paper</a>’s
+method section, only the scRNA-seq was done by
+<code>Illumina NextSeq6000</code> platform, <a href="https://www-ncbi-nlm-nih-gov.myaccess.library.utoronto.ca/geo/query/acc.cgi?acc=GPL24676">GPL24676</a>.
+We can use this clue to exclude all bulk RNA-seq</p>
+<pre class="r"><code># 1. Define your targets
+target_gse &lt;- &quot;GSE233947&quot;      # Your mixed study
+keep_platform &lt;- &quot;GPL24676&quot;    # The scRNA-seq platform (NovaSeq)
+
+# 2. Construct the query
+# We join the &#39;link&#39; table (gse_gsm) with the &#39;sample&#39; table (gsm) 
+# to check the platform (gpl) column.
+sql_filter &lt;- paste0(
+  &quot;SELECT t1.gsm &quot;,
+  &quot;FROM gse_gsm t1 &quot;,
+  &quot;JOIN gsm t2 ON t1.gsm = t2.gsm &quot;,
+  &quot;WHERE t1.gse = &#39;&quot;, target_gse, &quot;&#39; &quot;,
+  &quot;AND t2.gpl = &#39;&quot;, keep_platform, &quot;&#39;&quot;
+)
+
+# 3. Get the list of pure scRNA-seq samples
+sc_gsm_list &lt;- dbGetQuery(con, sql_filter)
+
+# 4. View results
+print(paste(&quot;Found&quot;, nrow(sc_gsm_list), &quot;scRNA-seq samples.&quot;))</code></pre>
+<pre><code>## [1] &quot;Found 9 scRNA-seq samples.&quot;</code></pre>
+<pre class="r"><code>head(sc_gsm_list)</code></pre>
+<pre><code>##          gsm
+## 1 GSM7439569
+## 2 GSM7439570
+## 3 GSM7439571
+## 4 GSM7439572
+## 5 GSM7439573
+## 6 GSM7439574</code></pre>
 </div>
 
 

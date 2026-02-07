@@ -13,3 +13,93 @@ link-citations: true            # this is for the citations/bibliography
 ---
 
 # Data Download
+
+My choice of dataset is `GSE209552`.
+
+```{r}
+# Define global constant
+GSE_NUM <- "GSE209552"
+```
+
+To setup [GEOmetadb Tutorial](https://www.bioconductor.org/packages/release/bioc/html/GEOmetadb.html), follow [GEOmetadb Tutorial Chapter 3](https://bcb420-2026.github.io/Exercise_Finding_Expression_data/setting-up-geometadb.html)
+
+```{r}
+# Install required package if not installed
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+if (!requireNamespace("GEOmetadb", quietly = TRUE))
+  BiocManager::install("GEOmetadb")
+if (!requireNamespace("DBI", quietly = TRUE))
+  install.packages("DBI")
+if (!requireNamespace("RSQLite", quietly = TRUE))
+  install.packages("RSQLite")
+if (!requireNamespace("dplyr", quietly = TRUE))
+  install.packages("dplyr")
+if (!requireNamespace("ggplot2", quietly = TRUE))
+  install.packages("ggplot2")
+
+# Attach packages
+library(GEOmetadb)
+library(DBI)
+library(RSQLite)
+
+# Download SQLite database if not exist
+if (!file.exists('GEOmetadb.sqlite')) getSQLiteFile()
+file.info('GEOmetadb.sqlite')
+
+# Connect to database
+con <- dbConnect(SQLite(), 'GEOmetadb.sqlite')
+```
+
+Download data, follow [Identifier Mapping Tutorial](https://bcb420-2026.github.io/Example_Student/id_mapping/getting-data-from-geo.html). The helper function defined below is modified based on [Identifier Mapping Tutorial's helper function](https://github.com/bcb420-2026/Example_Student/blob/main/in_class_exercises/id_mapping/fetch_geo_supp.R) to avoid duplicated download.
+
+```{r}
+# Define helper function
+fetch_geo_supp <- function(gse, destdir = "data") {
+  # Calculate the actual path where GEOquery puts the files
+  target_path <- file.path(destdir, gse)
+  
+  # Check if directory exists AND contains files
+  if (dir.exists(target_path) && length(list.files(target_path)) > 0) {
+    message(paste("Data found at", target_path, "- Skipping download."))
+    return(invisible(target_path))
+  }
+  
+  # If missing or empty, proceed with download
+  message(paste("Downloading", gse, "to", destdir, "..."))
+  dir.create(destdir, showWarnings = FALSE, recursive = TRUE)
+  GEOquery::getGEOSuppFiles(GEO = gse, baseDir = destdir, makeDirectory = TRUE)
+  
+  invisible(target_path)
+}
+
+# Download
+fetch_geo_supp(gse = GSE_NUM)
+```
+
+This GSE contain both scRNA-seq and bulk RNA-seq sample. Removal of bulk RNA-seq is needed to avoid significant batch effect due to their technical difference. Although the number of sample is reduced to 12, it's still sufficient.
+
+Refer to the [original paper](https://doi.org/10.1016/j.celrep.2023.113395)'s method section, only the scRNA-seq was done by `Illumina NextSeq6000` platform, [GPL24676](https://www-ncbi-nlm-nih-gov.myaccess.library.utoronto.ca/geo/query/acc.cgi?acc=GPL24676). We can use this clue to exclude all bulk RNA-seq
+
+```{r}
+# 1. Define your targets
+keep_platform <- "GPL24676"    # The scRNA-seq platform (NovaSeq)
+
+# 2. Construct the query
+# We join the 'link' table (gse_gsm) with the 'sample' table (gsm) 
+# to check the platform (gpl) column.
+sql_filter <- paste0(
+  "SELECT t1.gsm ",
+  "FROM gse_gsm t1 ",
+  "JOIN gsm t2 ON t1.gsm = t2.gsm ",
+  "WHERE t1.gse = '", GSE_NUM, "' ",
+  "AND t2.gpl = '", keep_platform, "'"
+)
+
+# 3. Get the list of pure scRNA-seq samples
+sc_gsm_list <- dbGetQuery(con, sql_filter)
+
+# 4. View results
+print(paste("Found", nrow(sc_gsm_list), "scRNA-seq samples."))
+head(sc_gsm_list)
+```
