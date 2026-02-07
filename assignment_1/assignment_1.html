@@ -1637,6 +1637,8 @@ if (!requireNamespace(&quot;Seurat&quot;, quietly = TRUE))
   install.packages(&quot;Seurat&quot;)</code></pre>
 <div id="reorganize-scrna-seq-files" class="section level2">
 <h2>Reorganize scRNA-seq files</h2>
+<p>The raw count data was stored in <code>GSE209552_RAW.tar</code> file,
+thus need to be unpacked using <code>untar()</code> function.</p>
 <pre class="r"><code># Attach packages
 library(Seurat)</code></pre>
 <pre><code>## Loading required package: SeuratObject</code></pre>
@@ -1688,6 +1690,17 @@ unpack_geo_tar &lt;- function(tar_path, dest_dir) {
 # Run the unpacker
 unpack_geo_tar(tar_file, extract_dir)</code></pre>
 <pre><code>## 📂 Extracted files found at data/GSE209552/raw_files - Skipping unpack.</code></pre>
+<p>The unpacked file is very messy, contain all 10x genomics scRNA-seq
+files, bulk RNA-seq files, subsetted Transposable Elements file,
+clustered files, and normalized files. Among those, only 10x genomics is
+what we need.</p>
+<p>To extract, we utilize previously defined <code>sc_gsm_list</code>,
+loop over it, exclude any file contain <code>_TE_</code>, indicate
+Transposable Elements, only extract files end with either
+<code>barcode</code>, <code>matrix</code>, or <code>features</code>.
+Lastly, trim the file name to <code>barcode</code>, <code>matrix</code>,
+<code>features</code> only, to meet the expected naming format of <a href="https://satijalab.org/seurat/">Seurat</a>’s <code>Read10X()</code>
+function.</p>
 <pre class="r"><code># Reorganize all scRNA-seq 10x files in to a new directory
 dest_dir &lt;- &quot;data/GSE209552/10x_organized&quot;    # Where they should go
 dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
@@ -1760,6 +1773,11 @@ message(&quot;🎉 Organization Complete.&quot;)</code></pre>
 </div>
 <div id="load-scrna-seq-files-into-r-using-seurat" class="section level2">
 <h2>Load scRNA-seq files into R using Seurat</h2>
+<p>Loading of expression data is done by iteratively call <a href="https://satijalab.org/seurat/">Seurat</a>’s <code>Read10X()</code>
+and <code>CreateSeuratObject()</code> function over all GSMs. They
+cooperatively first read a 10X genomics structured file and create a
+<code>Seurat Object</code>, which in the basic unit for any data
+manipulation in <a href="https://satijalab.org/seurat/">Seurat</a>.</p>
 <pre class="r"><code># Get the list of sample subdirectories
 sample_dirs &lt;- list.dirs(dest_dir, recursive = FALSE)
 
@@ -1805,6 +1823,11 @@ message(paste(&quot;🚀 Loading&quot;, length(sample_dirs), &quot;samples...&qu
 <pre><code>##   ✅ Loaded: GSM6376822</code></pre>
 <pre class="r"><code>length(seurat_list)</code></pre>
 <pre><code>## [1] 17</code></pre>
+<p>However, the metadata (contain condition information) need to fetched
+from <a href="https://www.bioconductor.org/packages/release/bioc/html/GEOmetadb.html">GEOmetadb</a>,
+and extract from <code>GSM</code> table’s
+<code>characteristics_ch1</code> column, and then insert into
+corresponding Seurat object’s metadata layer.</p>
 <pre class="r"><code># Load GSMs metadata from GEOmetadb
 gsm_list_string &lt;- paste(paste0(&quot;&#39;&quot;, sc_gsm_list, &quot;&#39;&quot;), collapse = &quot;,&quot;)
 sql &lt;- paste0(

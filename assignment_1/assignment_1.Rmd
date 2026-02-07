@@ -126,6 +126,8 @@ if (!requireNamespace("Seurat", quietly = TRUE))
 
 ## Reorganize scRNA-seq files
 
+The raw count data was stored in `GSE209552_RAW.tar` file, thus need to be unpacked using `untar()` function.
+
 ```{r}
 # Attach packages
 library(Seurat)
@@ -156,7 +158,13 @@ unpack_geo_tar <- function(tar_path, dest_dir) {
 
 # Run the unpacker
 unpack_geo_tar(tar_file, extract_dir)
+```
 
+The unpacked file is very messy, contain all 10x genomics scRNA-seq files, bulk RNA-seq files, subsetted Transposable Elements file, clustered files, and normalized files. Among those, only 10x genomics is what we need.
+
+To extract, we utilize previously defined `sc_gsm_list`, loop over it, exclude any file contain `_TE_`, indicate Transposable Elements, only extract files end with either `barcode`, `matrix`, or `features`. Lastly, trim the file name to `barcode`, `matrix`, `features` only, to meet the expected naming format of [Seurat](https://satijalab.org/seurat/)'s `Read10X()` function.
+
+```{r}
 # Reorganize all scRNA-seq 10x files in to a new directory
 dest_dir <- "data/GSE209552/10x_organized"    # Where they should go
 dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
@@ -227,6 +235,8 @@ message(paste("  🔸 Samples skipped (already done):", skipped_count))
 
 ## Load scRNA-seq files into R using Seurat
 
+Loading of expression data is done by iteratively call [Seurat](https://satijalab.org/seurat/)'s `Read10X()` and `CreateSeuratObject()` function over all GSMs. They cooperatively first read a 10X genomics structured file and create a `Seurat Object`, which in the basic unit for any data manipulation in [Seurat](https://satijalab.org/seurat/).
+
 ```{r}
 # Get the list of sample subdirectories
 sample_dirs <- list.dirs(dest_dir, recursive = FALSE)
@@ -254,7 +264,11 @@ for (dir in sample_dirs) {
   message(paste("  ✅ Loaded:", gsm_id))
 }
 length(seurat_list)
+```
 
+However, the metadata (contain condition information) need to fetched from [GEOmetadb](https://www.bioconductor.org/packages/release/bioc/html/GEOmetadb.html), and extract from `GSM` table's `characteristics_ch1` column, and then insert into corresponding Seurat object's metadata layer.
+
+```{r}
 # Load GSMs metadata from GEOmetadb
 gsm_list_string <- paste(paste0("'", sc_gsm_list, "'"), collapse = ",")
 sql <- paste0(
@@ -306,4 +320,3 @@ library(ggplot2)
 library(patchwork)
 
 ```
-
