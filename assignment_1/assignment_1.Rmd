@@ -1,15 +1,19 @@
 ---
-title: "Assignment #1"
+title: 'Assignment #1'
 author: "Jiaqi Ma"
 date: "2026-02-06"
 output:
+  html_notebook:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    code_folding: none
   html_document:
-    toc: true                   # this is to generate a table of contents
-    toc_depth: 2                # this is to control what level of header we are going to display on the table of contents 
-    toc_float: true             #this is to have a floating table of contents
-    code_folding: none          # this is to fold/hide the code 
-bibliography: BCB420.bib        # this is for the citations/bibliography 
-link-citations: true            # this is for the citations/bibliography
+    toc: true
+    toc_depth: '2'
+    df_print: paged
+bibliography: BCB420.bib
+link-citations: true
 ---
 
 # Data Download
@@ -294,29 +298,82 @@ for (gsm in names(seurat_list)) {
   }
 }
 
-# Skipped cause my laptop don't have enough emeory
-# Final Merge
-# combined_seurat <- merge(
-#   x = seurat_list[[1]], 
-#   y = seurat_list[-1], 
-#   add.cell.ids = names(seurat_list), 
-#   project = "GSE209552"
-# )
+# Final Merge all samples into one seurat obj
+combined_seurat <- merge(
+ x = seurat_list[[1]], 
+ y = seurat_list[-1], 
+ add.cell.ids = names(seurat_list), 
+ project = "GSE209552"
+)
 # Verify
-# table(combined_seurat$Condition)
+table(combined_seurat$Condition)
 ```
 
 ## Data exploriation
 
 Plot the following statistics:
 
--   Number of unique identifier among cells (infer coverage)
--   Number of total identifier among cells (infer depth)
--   Number of samples and cells in control group
--   Number of samples and cells in treatment group
+-   Number of unique identifier (infer coverage)
+-   Number of total amount of identifier (infer depth)
+-   Number of samples
+-   Number of cells
 
-```{r}
+```{r qc-plot, fig.width=14, fig.height=14, fig.align='center', dpi=300, out.width="100%"}
 library(ggplot2)
 library(patchwork)
 
+theme_set(theme_classic(base_size = 26))
+
+# 1. Coverage (nFeature_RNA)
+p_cov <- VlnPlot(
+  combined_seurat, 
+  features = "nFeature_RNA", 
+  group.by = "Condition", 
+  pt.size = 0
+) + 
+  ggtitle("Coverage") + 
+  ylab("nFeature_RNA")
+
+# 2. Depth (nCount_RNA) with adjusted axis
+p_depth <- VlnPlot(
+  combined_seurat, 
+  features = "nCount_RNA", 
+  group.by = "Condition", 
+  pt.size = 0
+) + 
+  ggtitle("Depth") + 
+  ylab("nCount_RNA") +
+  scale_y_continuous(limits = c(0, 50000)) 
+
+# Combine them to recreate p_metrics
+p_metrics <- p_cov | p_depth
+
+# Number of cells among conditions
+meta_data <- combined_seurat@meta.data
+
+# A. Bar plot: Total Number of Cells per Condition
+p_cells <- ggplot(meta_data, aes(x = Condition, fill = Condition)) +
+  geom_bar(color = "black") +
+  geom_text(stat = 'count', aes(label = after_stat(count)), vjust = -0.5) +
+  theme_classic() +
+  labs(title = "Total Cells per Group", y = "Number of Cells", x = NULL) +
+  theme(legend.position = "none")
+
+# Number of samples among conditions
+p_samples <- meta_data %>%
+  group_by(Condition) %>%
+  summarize(Sample_Count = n_distinct(orig.ident)) %>%
+  ggplot(aes(x = Condition, y = Sample_Count, fill = Condition)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_text(aes(label = Sample_Count), vjust = -0.5) +
+  theme_classic() +
+  labs(title = "Total Samples per Group", y = "Number of Samples", x = NULL) +
+  theme(legend.position = "none")
+
+# Merge plots
+final_plot <- p_metrics / (p_samples | p_cells)
+
+# Adjust font size
+final_plot <- final_plot & theme_classic(base_size = 16)
+final_plot
 ```
