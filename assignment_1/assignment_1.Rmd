@@ -380,7 +380,7 @@ final_plot
 
 **Figure 1:** Overall statistics of dataset `GSE209552` grouped by condition (Control v.s. tbi). The upper-left panel indicate the number of unique identifier; The upper-right panel indicate the total amount of identifier, the maximum amount of identifier was limited up to 50000 for the sake of aesthetics; The lower-left panel indicate number of samples (GSMs); The lower-right panel indicate the number of cells"; X-axis of all four panel indicate condition.
 
-Generally, control group have higher depth and coverage, but less sample and cells. 
+Generally, control group have higher depth and coverage, but less sample and cells.
 
 Then plot the statistics below per sample (GSM):
 
@@ -451,6 +451,7 @@ final_plot <- final_plot & theme_classic(base_size = 16) &
 
 final_plot
 ```
+
 **Figure 2:** Overall statistics per sample (GSM). The top panel indicate number of unique identifier; The middle panel indicate number of total identifier; The bottom panel indicate number of cells; X-axis of all three panel indicate samples (GSMs); The vertial red dash line sepeate control (left side of red line), and tbi (right side of red line).
 
 In general, the sequence depth and coverage is more consistence among control group. Tbi group has more variated depth and coverage with `GSM637681` being the sample of lowest depths and coverage. The number of cells within different sample also varies, from highest 3708 (`GSM6376822`) to lowest 358 (`GSM6376820`). This imbalance in cell number may result in downstream analysis dominate by sample which contain more cells.
@@ -468,6 +469,37 @@ VlnPlot(combined_seurat, features = c("percent.mt")) +
     legend.position = "none" # Hide legend since x-axis already shows the names
   ) + vertical_line
 ```
+
 **Figure 3:** Mitochondrial transcript percentage grouped by GSMs. The Y-axis indicate mitochondrial transcript percentage; The X-axis indicate GSM; The vertial red dash line sepeate control (left side of red line), and tbi (right side of red line).
 
-The mitochondrial transcript percentage aligned with previous depth and coverage among samples, where control group tend to be more consistent. A hypothesis is that Traumatic Brain Injury (TBI) is a broad term that include various brain damage result from external force, and the intensity and exact pathology may vary among different tbi sample, reflected by sequence depth and coverage. Noticeably, `GSM6376814` has relatively higher mitochondrial transcript percentage, and recall that it's also the sample having lowest depth and coverage, which might imply existing technical variance that could bias downstream analysis. 
+The mitochondrial transcript percentage aligned with previous depth and coverage among samples, where control group tend to be more consistent. A hypothesis is that Traumatic Brain Injury (TBI) is a broad term that include various brain damage result from external force, and the intensity and exact pathology may vary among different tbi sample, reflected by sequence depth and coverage. Noticeably, `GSM6376814` has relatively higher mitochondrial transcript percentage, and recall that it's also the sample having lowest depth and coverage, which might imply existing technical variance and/or batch effect that could bias downstream analysis.
+
+## Mapping to HUGO symbols
+
+Check the current identifier
+```{r}
+head(rownames(combined_seurat))
+```
+
+At a glance, it's `HUGO` symbol. To veryify, we can query those symbol against `org.Hs.eg.db`.
+```{r}
+# Install org.Hs.eg.db
+BiocManager::install("org.Hs.eg.db")
+
+# Attach org.Hs.eg.db to current session
+library(org.Hs.eg.db)
+
+# Check how many of them exist in the official symbol database
+valid_symbols <- mapIds(org.Hs.eg.db, 
+                        keys = rownames(combined_seurat), 
+                        column = "SYMBOL", 
+                        keytype = "SYMBOL", 
+                        multiVals = "first")
+
+# Calculate the percentage of matches
+sum(!is.na(valid_symbols)) / length(rownames(combined_seurat)) * 100
+```
+
+`100%` valid symbols confirmed the symbol is acually `HUGO` symbol.
+
+## Cleaning
