@@ -424,7 +424,7 @@ p_depth <- VlnPlot(
     axis.title.x = element_blank()
   ) + vertical_line
 
-# A. Bar plot: Total Number of Cells per Condition
+# A. Bar plot: Total Number of Cells per Sample
 meta_data <- combined_seurat@meta.data # Ensure meta_data is defined
 p_cells <- ggplot(meta_data, aes(x = orig.ident, fill = orig.ident)) +
   geom_bar(color = "black") +
@@ -452,7 +452,7 @@ final_plot <- final_plot & theme_classic(base_size = 16) &
 final_plot
 ```
 
-**Figure 2:** Overall statistics per sample (GSM). The top panel indicate number of unique identifier; The middle panel indicate number of total identifier; The bottom panel indicate number of cells; X-axis of all three panel indicate samples (GSMs); The vertial red dash line sepeate control (left side of red line), and tbi (right side of red line).
+**Figure 2:** Overall statistics per sample (GSM). The top panel indicate number of unique identifier; The middle panel indicate number of total identifier; The bottom panel indicate number of cells; X-axis of all three panel indicate samples (GSMs); The vertical red dash line separate control (left side of red line), and tbi (right side of red line).
 
 In general, the sequence depth and coverage is more consistence among control group. Tbi group has more variated depth and coverage with `GSM637681` being the sample of lowest depths and coverage. The number of cells within different sample also varies, from highest 3708 (`GSM6376822`) to lowest 358 (`GSM6376820`). This imbalance in cell number may result in downstream analysis dominate by sample which contain more cells.
 
@@ -477,14 +477,18 @@ The mitochondrial transcript percentage aligned with previous depth and coverage
 ## Mapping to HUGO symbols
 
 Check the current identifier
+
 ```{r}
 head(rownames(combined_seurat))
 ```
 
-At a glance, it's `HUGO` symbol. To veryify, we can query those symbol against `org.Hs.eg.db`.
+At a glance, it's `HUGO` symbol. To verify, we can query those symbol against `org.Hs.eg.db`.
+
 ```{r}
 # Install org.Hs.eg.db
-BiocManager::install("org.Hs.eg.db")
+if (!requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+  BiocManager::install("org.Hs.eg.db")
+}
 
 # Attach org.Hs.eg.db to current session
 library(org.Hs.eg.db)
@@ -503,3 +507,36 @@ sum(!is.na(valid_symbols)) / length(rownames(combined_seurat)) * 100
 `100%` valid symbols confirmed the symbol is acually `HUGO` symbol.
 
 ## Cleaning
+
+First we remove `GSM6376814`, since it has the lowest depth, coverage, and highest `mitochondrial transcript percentage`, thus pron to contaminate downstream analysis.
+
+```{r}
+combined_seurat <- combined_seurat[, combined_seurat$orig.ident != "GSM6376814"]
+```
+
+Based on [Seurat](https://satijalab.org/seurat/) and [Heumos et al, 2023](https://doi.org/10.1038/s41576-023-00586-w), they simply applied hard threshold on mitochondrial transcript percentage, `5%` and `8%`, at their quality control step. Additionally, refer to previous `Figure 3`, I empirically choice the threshold to be `10%`.
+
+```{r}
+combined_seurat <- combined_seurat[, combined_seurat$percent.mt <= 10]
+```
+
+In the end, `2887/24621 = 11.7%` cells were removed. Compare with [original paper](https://doi.org/10.1016/j.celrep.2023.113395), they removed `9511/24621 = 38.6%` cells.
+
+```{r filtered-plot, fig.width=14, fig.height=6, fig.align='center', dpi=300, out.width="100%"}
+meta_data <- combined_seurat@meta.data # Ensure meta_data is defined
+p_cells <- ggplot(meta_data, aes(x = orig.ident, fill = orig.ident)) +
+  geom_bar(color = "black") +
+  geom_text(stat = 'count', aes(label = after_stat(count)), vjust = -0.5) +
+  theme_classic() +
+  labs(title = "Total Cells per Sample (After cleaning)", y = "Number of Cells", x = NULL) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  coord_fixed(ratio = 0.001)  +
+  scale_y_continuous(limits = c(0, 5000)) + vertical_line
+p_cells
+```
+**Figure 4:** Number of cells after cleaning grouped by GSMs. The Y-axis indicate number of cells; The X-axis indicate GSMs; The vertical red dash line separate control (left side of red line), and tbi (right side of red line).
+
+# Normalization
