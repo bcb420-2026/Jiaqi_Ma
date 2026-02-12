@@ -1,0 +1,359 @@
+---
+title: "R Notebook"
+output:
+  html_notebook:
+    df_print: paged
+---
+
+# Front note
+
+I will try write my scripts in `.rmd` file instead of `.r`. Cuz the experience from writing assignment #1 using `.rmd` makes me agree `.rmd` is better in terms of documentation.
+
+# Chapter 1
+
+Nothing to practice
+
+# Chapter 2
+
+Nothing to practice
+
+# Chapter 3 Visualizing distributions
+
+## 3.1 load data
+
+Before choosing a normalization method, inspect data distributions.
+
+```{r}
+# load packages
+library(GEOquery)
+library(knitr)
+library(dplyr)
+library(tibble)
+library(tidyverse)
+
+# Define GSE number
+gse <- "GSE119732"
+
+# source helpter function
+source("./supp_functions.R")
+
+# Download data
+fetch_geo_supp(gse = gse)
+
+path <- file.path("data", gse)
+files <- list.files(path, pattern = "\\.txt.gz$|\\.tsv.gz$|\\.csv.gz$", 
+                    full.names = TRUE, recursive = TRUE)
+```
+
+Raw table preview
+
+```{r}
+library(readr)
+
+safe_read <- function(file) {
+  # First attempt: read as TSV
+  df <- tryCatch(
+    readr::read_tsv(file, show_col_types = FALSE),
+    error = function(e) NULL   # catch fatal errors
+  )
+  
+  # If read_tsv failed entirely:
+  if (is.null(df)) {
+    message("TSV read failed — reading as space-delimited file instead.")
+    return(readr::read_table(file, show_col_types = FALSE))
+  }
+  
+  # If read_tsv returned but with parsing issues:
+  probs <- problems(df)
+  if (nrow(probs) > 0) {
+    message("Parsing issues detected in TSV — reading as space-delimited file instead.")
+    return(readr::read_table(file, show_col_types = FALSE))
+  }
+  
+  # If everything was fine:
+  return(df)
+}
+
+x <- safe_read(files[1])
+
+kable_head(x[, 1:min(6, ncol(x))], 5, paste(gse,": raw table preview"))
+```
+
+## 3.2 Boxplots
+
+```{r}
+library(tidyverse)
+
+# suppose 'mat' is a gene x sample matrix (numeric)
+plot_box <- function(mat, main = "", ylab = "log2(counts+1)") {
+  df <- as.data.frame(mat)
+  df_long <- df |>
+    mutate(gene = rownames(df)) |>
+    pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+    mutate(value = log2(value + 1))
+
+  ggplot(df_long, aes(x = sample, y = value)) +
+    geom_boxplot(outlier.size = 0.2) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    labs(title = main, x = "Sample", y = ylab)
+}
+
+plot_box(x[,2:ncol(x)])
+```
+
+3.3 Density plots
+
+```{r}
+plot_density <- function(mat, main = "") {
+  df <- as.data.frame(mat)
+  df_long <- df |>
+    mutate(gene = rownames(df)) |>
+    pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+    mutate(value = log2(value + 1))
+
+  ggplot(df_long, aes(x = value, colour = sample)) +
+    geom_density() +
+    theme_bw() +
+    labs(title = main, x = "log2(counts+1)", y = "Density") +
+    guides(colour = "none")
+}
+
+plot_density(x[,2:ncol(x)])
+```
+
+# Chapter 4 Normalization method
+
+## 4.1 Library-size scaling
+
+The simplest approach divides each sample by its total counts (or reads) to account for sequencing depth
+
+## 4.2 Distribution-based normalization
+
+Methods like quantile normalization force sample distribution to match and common in microarrays
+
+## RNA-seq composition-aware methods
+
+Two widely used methods:
+
+-   TMM (edgeR): computes scaling factors to adjust effective library size.
+-   RLE/size factors (DESrq2): median-of-ratios approach
+
+### edgeR: TMM
+
+TMM looks at most genes, ignores the weird ones, figures out how different two samples really are, and uses that to scale the samples so they’re comparable.
+
+```{r}
+library(edgeR)
+
+dge <- DGEList(counts = x)
+dge <- calcNormFactors(dge, method = "TMM")
+logcpm <- cpm(dge, log = TRUE, prior.count = 1)
+```
+
+### DESeq2: size factors
+
+RLE finds what "most genes" are doing compared to a typical sample. It adjust each sample so that the median gene looks the same in all samples.
+
+```{r}
+library(DESeq2)
+
+dds <- DESeqDataSetFromMatrix(countData = x, colData = meta, design = ~ condition)
+dds <- estimateSizeFactors(dds)
+
+norm_counts <- counts(dds, normalized = TRUE)
+```
+
+# Chapter 5 Worked normalization examples
+
+## 5.1 Setup
+
+```{r}
+# Attach packages
+library(GEOquery)
+library(knitr)
+library(dplyr)
+library(tibble)
+library(tidyverse)
+
+gse <- "GSE119732"
+
+source("./supp_functions.R")
+fetch_geo_supp(gse = gse)
+
+path <- file.path("data", gse)
+files <- list.files(path, pattern = "\\.txt.gz$|\\.tsv.gz$|\\.csv.gz$", 
+                    full.names = TRUE, recursive = TRUE)
+```
+
+## 5.2 Raw table preview
+
+```{r}
+library(readr)
+
+safe_read <- function(file) {
+  # First attempt: read as TSV
+  df <- tryCatch(
+    readr::read_tsv(file, show_col_types = FALSE),
+    error = function(e) NULL   # catch fatal errors
+  )
+  
+  # If read_tsv failed entirely:
+  if (is.null(df)) {
+    message("TSV read failed — reading as space-delimited file instead.")
+    return(readr::read_table(file, show_col_types = FALSE))
+  }
+  
+  # If read_tsv returned but with parsing issues:
+  probs <- problems(df)
+  if (nrow(probs) > 0) {
+    message("Parsing issues detected in TSV — reading as space-delimited file instead.")
+    return(readr::read_table(file, show_col_types = FALSE))
+  }
+  
+  # If everything was fine:
+  return(df)
+}
+
+x <- safe_read(files[1])
+
+
+kable_head(x[, 1:min(6, ncol(x))], 5, paste(gse,": raw table preview"))
+```
+
+## 5.3 Example 1: GSE119732
+
+```{r}
+plot_box(x[,2:ncol(x)])
+plot_density(x[,2:ncol(x)])
+```
+
+## 5.4 convert raw counts to Counts per million (CPM)
+
+```{r}
+library(edgeR)
+
+x_cpm <- cpm(y = x[,2:ncol(x)])
+
+plot_box(x_cpm,main = "CPM - all genes")
+plot_density(x_cpm,main = "CPM - all genes, NO design")
+```
+
+## 5.5 Filter out lowly expressed genes
+
+```{r}
+to_remove <- edgeR::filterByExpr(x_cpm,min.count = 3)
+x_cpm_filtered <- x_cpm[to_remove,]
+
+plot_box(x_cpm_filtered,main = "CPM filtered out lowly expressed - \nNO design matrix")
+plot_density(x_cpm_filtered,main = "CPM filtered out lowly expressed - \n - NO design matrix")
+```
+
+## 5.6 Incorporate a design matrix - description of the samples
+
+```{r}
+colnames(x)
+
+#design matrix - 
+samples <- colnames(x)[2:ncol(x)]
+patient  <- substr(samples, 1, 1)       
+celltype <- substr(samples, 2, nchar(samples))   
+sample_data <- data.frame(samples, patient, celltype)
+
+
+design <- model.matrix(~ 0 + celltype,data = sample_data)
+rownames(design) <- sample_data$samples
+colnames(design) <- paste0("celltype", levels(factor(celltype)))
+design
+
+# Filter use design information
+to_remove_withdesign <- edgeR::filterByExpr(x_cpm,min.count = 3,
+                                            design = design)
+x_cpm_filtered_withdesign <- x_cpm[to_remove_withdesign,]
+
+plot_box(x_cpm_filtered_withdesign,main = "CPM filtered out lowly expressed - \n - with design matrix")
+
+plot_density(x_cpm_filtered_withdesign,main = "CPM filtered out lowly expressed - \n - with design matrix")
+```
+
+## 5.7 Normalize dataset using TMM
+
+```{r}
+library(edgeR)
+
+dge <- DGEList(counts = x[,2:ncol(x)])
+dge_filtered <- dge[filterByExpr(dge),]
+
+dge_filtered  <- calcNormFactors(dge_filtered , method = "TMM")
+norm_cpm <- cpm(dge_filtered , log = FALSE, prior.count = 1)
+
+plot_box(norm_cpm)
+
+plot_density(norm_cpm)
+```
+
+## 5.8 Look at distribution of our samples in 2D space
+
+```{r}
+y <- dge_filtered
+
+plotMDS(y, top = 500, labels = colnames(y), 
+       col = as.integer(y$samples$group))
+legend("topright", legend = levels(y$samples$group),
+       col = seq_along(levels(y$samples$group)), pch = 16, bty = "n")
+
+# Incorporate the design into the process
+dge <- DGEList(counts = x[,2:ncol(x)],group = sample_data$celltype)
+dge_filtered <- dge[filterByExpr(dge),]
+dge_filtered  <- calcNormFactors(dge_filtered , method = "TMM")
+norm_cpm <- cpm(dge_filtered , log = FALSE, prior.count = 1)
+
+plot_box(norm_cpm)
+
+plot_density(norm_cpm)
+
+y <- dge_filtered
+
+plotMDS(y, top = 500, labels = colnames(y), 
+       col = as.integer(y$samples$group))
+legend("topright", legend = levels(y$samples$group),
+       col = seq_along(levels(y$samples$group)), pch = 16, bty = "n")
+
+# Incorporate the design into the process
+dge <- DGEList(counts = x[,2:ncol(x)],group = sample_data$patient)
+dge_filtered <- dge[filterByExpr(dge),]
+dge_filtered  <- calcNormFactors(dge_filtered , method = "TMM")
+norm_cpm <- cpm(dge_filtered , log = FALSE, prior.count = 1)
+
+plot_box(norm_cpm)
+plot_density(norm_cpm)
+y <- dge_filtered
+
+plotMDS(y, top = 500, labels = colnames(y), 
+       col = as.integer(y$samples$group))
+legend("topright", legend = levels(y$samples$group),
+       col = seq_along(levels(y$samples$group)), pch = 16, bty = "n")
+```
+
+## 5.9 Normalize the Dataset using RLE
+
+```{r}
+library(DESeq2)
+
+counts <- x[,2:ncol(x)]
+
+keep <- rowSums(counts >= 10) >= 2
+counts_filtered <- counts[keep, ]
+
+dds <- DESeqDataSetFromMatrix(countData = counts_filtered, 
+                              colData = sample_data,
+                              design = design)
+
+dds <- estimateSizeFactors(dds)
+
+norm_counts <- counts(dds, normalized = TRUE)
+
+plot_box(norm_counts)
+plot_density(norm_counts)
+```
+
