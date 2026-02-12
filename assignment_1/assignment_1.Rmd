@@ -1,17 +1,17 @@
 ---
-title: 'Assignment #1'
+title: "Assignment #1"
 author: "Jiaqi Ma"
 date: "2026-02-06"
 output:
-  html_document:
-    toc: true
-    toc_depth: '2'
-    df_print: paged
   html_notebook:
     toc: true
     toc_depth: 2
     toc_float: true
     code_folding: none
+  html_document:
+    toc: true
+    toc_depth: 2
+    df_print: paged
 bibliography: BCB420.bib
 link-citations: true
 ---
@@ -21,6 +21,7 @@ link-citations: true
 ------------------------------------------------------------------------
 
 -   My choice of dataset is `GSE209552`.
+-   Note: `GSE209552` is single nucleus RNA-seq (`snRNA-seq`).
 
 ```{r}
 # Define global constant
@@ -87,17 +88,17 @@ fetch_geo_supp <- function(gse, destdir = "data") {
 fetch_geo_supp(gse = GSE_NUM)
 ```
 
-## Construct scRNA-seq only reference list
+## Construct snRNA-seq only reference list
 
-This GSE contain both scRNA-seq and bulk RNA-seq sample. Removal of bulk RNA-seq is needed to avoid significant batch effect due to their technical difference. Although the number of sample is reduced to 17, it's still sufficient amount.
+This GSE contain both `snRNA-seq` and `bulk RNA-seq` sample. Removal of bulk RNA-seq is needed to avoid significant batch effect due to their technical difference. Although the number of samples is reduced to 17, it's still sufficient amount.
 
-Refer to the [original paper](https://doi.org/10.1016/j.celrep.2023.113395)'s method section, only the scRNA-seq was done by `Illumina NextSeq6000` platform, [GPL24676](https://www-ncbi-nlm-nih-gov.myaccess.library.utoronto.ca/geo/query/acc.cgi?acc=GPL24676). We can use this clue to exclude all bulk RNA-seq
+Refer to the [original paper](https://doi.org/10.1016/j.celrep.2023.113395)'s method section, only the `snRNA-seq` was done by `Illumina NextSeq6000` platform, [GPL24676](https://www-ncbi-nlm-nih-gov.myaccess.library.utoronto.ca/geo/query/acc.cgi?acc=GPL24676). We can use this clue to exclude all `bulk RNA-seq`.
 
 Since all GSMs of this study are packed in one `GSE209552_RAW.tar` file in GEO, we can't indicate which platform to include/exclude at download step. Thus we will construct a list of `GPL24676` GSMs for downstream reference by query `GEOmetabd`.
 
 ```{r}
 # Define desired platform
-scRNA_platform <- "GPL24676"
+snRNA_platform <- "GPL24676"
 
 # Construct the query
 # We join the 'link' table (gse_gsm) with the 'sample' table (gsm) 
@@ -107,15 +108,15 @@ sql_filter <- paste0(
   "FROM gse_gsm t1 ",
   "JOIN gsm t2 ON t1.gsm = t2.gsm ",
   "WHERE t1.gse = '", GSE_NUM, "' ",
-  "AND t2.gpl = '", scRNA_platform, "'"
+  "AND t2.gpl = '", snRNA_platform, "'"
 )
 
-# Get the list of pure scRNA-seq samples
-sc_gsm_list <- dbGetQuery(con, sql_filter)$gsm
+# Get the list of pure snRNA-seq samples
+sn_gsm_list <- dbGetQuery(con, sql_filter)$gsm
 
 # View results
-print(paste("Found", length(sc_gsm_list), "scRNA-seq samples."))
-sc_gsm_list
+print(paste("Found", length(sn_gsm_list), "snRNA-seq samples."))
+sn_gsm_list
 ```
 
 # Access data quality
@@ -128,7 +129,7 @@ if (!requireNamespace("Seurat", quietly = TRUE))
   install.packages("Seurat")
 ```
 
-## Reorganize scRNA-seq files
+## Reorganize snRNA-seq files
 
 The raw count data was stored in `GSE209552_RAW.tar` file, thus need to be unpacked using `untar()` function.
 
@@ -164,22 +165,22 @@ unpack_geo_tar <- function(tar_path, dest_dir) {
 unpack_geo_tar(tar_file, extract_dir)
 ```
 
-The unpacked file is very messy, contain all 10x genomics scRNA-seq files, bulk RNA-seq files, subsetted Transposable Elements file, clustered files, and normalized files. Among those, only 10x genomics is what we need.
+The unpacked file is very messy, contain all 10x genomics `snRNA-seq` files, `bulk RNA-seq` files, subsetted Transposable Elements file, clustered files, and normalized files. Among those, only 10x genomics `snRNA-seq` is what we need.
 
-To extract, we utilize previously defined `sc_gsm_list`, loop over it, exclude any file contain `_TE_`, indicate Transposable Elements, only extract files end with either `barcode`, `matrix`, or `features`. Lastly, trim the file name to `barcode`, `matrix`, `features` only, to meet the expected naming format of [Seurat](https://satijalab.org/seurat/)'s `Read10X()` function.
+To extract, we utilize previously defined `sn_gsm_list`, loop over it, exclude any file contain `_TE_`, indicate Transposable Elements, only extract files end with either `barcode`, `matrix`, or `features`. Lastly, trim the file name to `barcode`, `matrix`, `features` only, to meet the expected naming format of [Seurat](https://satijalab.org/seurat/)'s `Read10X()` function.
 
 ```{r}
-# Reorganize all scRNA-seq 10x files in to a new directory
+# Reorganize all snRNA-seq 10x files in to a new directory
 dest_dir <- "data/GSE209552/10x_organized"    # Where they should go
 dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
 
 # --- MAIN LOOP ---
-message(paste("🚀 Organizing files for", length(sc_gsm_list), "samples..."))
+message(paste("🚀 Organizing files for", length(sn_gsm_list), "samples..."))
 
 skipped_count <- 0
 moved_count   <- 0
 
-for (gsm in sc_gsm_list) {
+for (gsm in sn_gsm_list) {
   
   # 1. Define the specific destination path for this sample
   sample_subdir <- file.path(dest_dir, gsm)
@@ -204,7 +205,7 @@ for (gsm in sc_gsm_list) {
     next
   }
   
-  # 5. MOVE & RENAME (The Standardize Step)
+  # 5. MOVE & RENAME
   # We identify specific files to ensure we rename them correctly for Seurat
   f_matrix   <- files_to_move[grep("matrix", files_to_move, ignore.case = TRUE)]
   f_barcodes <- files_to_move[grep("barcodes", files_to_move, ignore.case = TRUE)]
@@ -220,7 +221,6 @@ for (gsm in sc_gsm_list) {
     file.rename(f_barcodes, file.path(sample_subdir, "barcodes.tsv.gz"))
     
     # Rename Genes/Features -> features.tsv.gz
-    # (Note: Seurat prefers 'features.tsv' over 'genes.tsv')
     file.rename(f_features, file.path(sample_subdir, "features.tsv.gz"))
     
     message(paste("  ✅ Standardized & Moved:", gsm))
@@ -237,7 +237,7 @@ message(paste("  🔹 Samples moved & standardized:", moved_count))
 message(paste("  🔸 Samples skipped (already done):", skipped_count))
 ```
 
-## Load scRNA-seq files into R using Seurat
+## Load snRNA-seq files into R using Seurat
 
 Loading of expression data is done by iteratively call [Seurat](https://satijalab.org/seurat/)'s `Read10X()` and `CreateSeuratObject()` function over all GSMs. They cooperatively first read a 10X genomics structured file and create a `Seurat Object`, which in the basic unit for any data manipulation in [Seurat](https://satijalab.org/seurat/).
 
@@ -270,11 +270,11 @@ for (dir in sample_dirs) {
 length(seurat_list)
 ```
 
-However, the metadata (contain condition information) need to fetched from [GEOmetadb](https://www.bioconductor.org/packages/release/bioc/html/GEOmetadb.html), and extract from `GSM` table's `characteristics_ch1` column, and then insert into corresponding Seurat object's metadata layer.
+However, the metadata (contain condition information) need to fetched from [GEOmetadb](https://www.bioconductor.org/packages/release/bioc/html/GEOmetadb.html), and extract from `GSM` table's `characteristics_ch1` column, and then insert into corresponding Seurat object's `meta.data` layer.
 
 ```{r}
 # Load GSMs metadata from GEOmetadb
-gsm_list_string <- paste(paste0("'", sc_gsm_list, "'"), collapse = ",")
+gsm_list_string <- paste(paste0("'", sn_gsm_list, "'"), collapse = ",")
 sql <- paste0(
   "SELECT gsm, title, characteristics_ch1 ",
   "FROM gsm ",
@@ -307,6 +307,9 @@ combined_seurat <- merge(
 )
 # Verify
 table(combined_seurat$Condition)
+
+# Delete `seurat_list` to free memory
+rm(seurat_list)
 ```
 
 ## Data exploriation
@@ -456,23 +459,52 @@ final_plot
 
 In general, the sequence depth and coverage is more consistence among control group. Tbi group has more variated depth and coverage with `GSM637681` being the sample of lowest depths and coverage. The number of cells within different sample also varies, from highest 3708 (`GSM6376822`) to lowest 358 (`GSM6376820`). This imbalance in cell number may result in downstream analysis dominate by sample which contain more cells.
 
-Another common quality control step in scRNA-seq is to remove `damaged cells`. When damaged cells were sequenced or damaged during sequencing, the expression intensity will scaled down due to leaked RNA, thus significantly bias downstream clustering, annotation, and differential gene expression analysis. A common method to conduct this filtering is using `mitochondrial transcript percentage`, based on this idea that if a cell has leaked RNA, the `mitochondrial transcript percentage` will be relatively higher since mitochondria is relatively large and less likely to leak.
+Another common quality control step in `scRNA-seq` is to remove `damaged cells`. When damaged cells were sequenced or damaged during sequencing, the expression intensity will scaled down due to leaked RNA, thus significantly bias downstream clustering, annotation, and differential gene expression analysis. A common method to conduct this filtering is using `mitochondrial transcript percentage`, based on this idea that if a cell has leaked RNA, the `mitochondrial transcript percentage` will be relatively higher since mitochondria is relatively large and less likely to leak. Empirically, the threshold is set to be `5% ~ 10%`
+
+However, when it comes to `snRNA-seq`, `mitochondrial transcript percentage` is expected to be `0%` because of the exclusion of cytoplasm, and any none-zero `mitochondrial transcript percentage` indicate incomplete exclusion of cytoplasm [Amezquita et al, 2020](https://doi.org/10.1038/s41592-019-0654-x). Thus we may want to choice a more strict threshold for `snRNA-seq`, like `1% ~ 2%`, to match the wet-lab design while tolerate low-quality cell to certain extent.
 
 ```{r mt-plot, fig.width=14, fig.height=14, fig.align='center', dpi=300, out.width="100%"}
 # Use seurat PercentageFeatureSet() function
 # Create a new entry in meta.data layer storing mitochondrial transcript percentage
 combined_seurat[["percent.mt"]] <- PercentageFeatureSet(combined_seurat, pattern = "^MT-")
-VlnPlot(combined_seurat, features = c("percent.mt")) +
+
+# Defin a horizontal line at Y == 5 indicate empirical mito% threashold
+horizontal_line <- geom_hline(yintercept = 10, linetype = "dashed", color = "red", size = 1)
+
+# Percent MT per CONDITION (Control vs TBI)
+p_condition <- VlnPlot(combined_seurat, features = c("percent.mt"), group.by = "Condition", pt.size = 0) +
   theme(
+    axis.title.x = element_blank(), 
+    legend.position = "none" # Hide legend since x-axis already shows the names
+  ) + 
+  ggtitle("Mitochondrial % by Condition") + 
+  horizontal_line + 
+  ylab("Mitochondrial Transcript (%)") + 
+  annotate("text", x = 0.5, y = 12, label = "mito % = 10", color = "black", hjust = 0, size = 5)
+
+# Percent MT per GSM
+p_sample <- VlnPlot(combined_seurat, features = c("percent.mt"), group.by = "orig.ident", pt.size = 0) +
+  theme(
+    axis.title.x = element_blank(), 
     # Rotate x-axis labels 45 degrees so they don't overlap
     axis.text.x = element_text(angle = 45, hjust = 1),
     legend.position = "none" # Hide legend since x-axis already shows the names
-  ) + vertical_line
+  ) + vertical_line + 
+  ggtitle("Mitochondrial % by Sample") + 
+  horizontal_line + 
+  ylab("Mitochondrial Transcript (%)") + 
+  annotate("text", x = 0.5, y = 12, label = "mito % = 10", color = "black", hjust = 0, size = 5)
+
+# 4. Combine them
+final_mt_plot <- p_condition / p_sample
+final_mt_plot
 ```
 
-**Figure 3:** Mitochondrial transcript percentage grouped by GSMs. The Y-axis indicate mitochondrial transcript percentage; The X-axis indicate GSM; The vertial red dash line sepeate control (left side of red line), and tbi (right side of red line).
+**Figure 3:** Mitochondrial transcript percentage grouped by GSMs. The Y-axis indicate mitochondrial transcript percentage; The X-axis of top panel indicate condition (Control v.s.); The X axis of bottom panel indicate GSM samples; The horizontal red dash line indicate empirical Mitochondrial transcript percentage threshold = 10%; The vertical red dash line at bottom panel separate control (left side of red line), and treatment (right side of red line).
 
-The mitochondrial transcript percentage aligned with previous depth and coverage among samples, where control group tend to be more consistent. A hypothesis is that Traumatic Brain Injury (TBI) is a broad term that include various brain damage result from external force, and the intensity and exact pathology may vary among different tbi sample, reflected by sequence depth and coverage. Noticeably, `GSM6376814` has relatively higher mitochondrial transcript percentage, and recall that it's also the sample having lowest depth and coverage, which might imply existing technical variance and/or batch effect that could bias downstream analysis.
+However, the `Mitochondrial transcript percentage` is way higher than expected in all samples and the [original paper](https://doi.org/10.1016/j.celrep.2023.113395) didn't assess the `Mitochondrial transcript percentage` at all. One clue that may explain this unexpected high `Mitochondrial transcript percentage` from their `Limitations of the study` is control tissues were post-mortem sample and tbi tissues were surgically evacuated rare case post-impact. Thus the integrity of samples were not at ideal condition and expected to contain damaged cells.
+
+On the other hands, `mitochondrial transcript percentage` aligned with previous depth and coverage among samples, where control group tend to be more consistent. A hypothesis is that Traumatic Brain Injury (TBI) is a broad term that include various brain damage result from external force, and the intensity and exact pathology may vary among different tbi sample, reflected by sequence depth and coverage. Noticeably, `GSM6376814` has relatively higher mitochondrial transcript percentage, and recall that it's also the sample having lowest depth and coverage, which might imply existing technical variance and/or batch effect that could bias downstream analysis.
 
 ## Mapping to HUGO symbols
 
@@ -511,32 +543,58 @@ sum(!is.na(valid_symbols)) / length(rownames(combined_seurat)) * 100
 First we remove `GSM6376814`, since it has the lowest depth, coverage, and highest `mitochondrial transcript percentage`, thus pron to contaminate downstream analysis.
 
 ```{r}
-combined_seurat <- combined_seurat[, combined_seurat$orig.ident != "GSM6376814"]
+combined_seurat <- subset(combined_seurat, subset = orig.ident != "GSM6376814")
 ```
 
 Based on [Seurat](https://satijalab.org/seurat/) and [Heumos et al, 2023](https://doi.org/10.1038/s41576-023-00586-w), they simply applied hard threshold on mitochondrial transcript percentage, `5%` and `8%`, at their quality control step. Additionally, refer to previous `Figure 3`, I empirically choice the threshold to be `10%`.
 
 ```{r}
-combined_seurat <- combined_seurat[, combined_seurat$percent.mt <= 10]
+combined_seurat <- subset(combined_seurat, subset = percent.mt <= 10)
 ```
 
 In the end, `2887/24621 = 11.7%` cells were removed. Compare with [original paper](https://doi.org/10.1016/j.celrep.2023.113395), they removed `9511/24621 = 38.6%` cells.
 
-```{r filtered-plot, fig.width=14, fig.height=6, fig.align='center', dpi=300, out.width="100%"}
-meta_data <- combined_seurat@meta.data # Ensure meta_data is defined
+```{r filtered-plot, fig.width=14, fig.height=10, fig.align='center', dpi=300, out.width="100%"}
+# 1. Mito % Plot (After Cleaning)
+p_mito_clean <- VlnPlot(
+  combined_seurat, 
+  features = "percent.mt", 
+  group.by = "orig.ident", 
+  pt.size = 0
+) + 
+  vertical_line + 
+  ggtitle("Mitochondrial % per Sample (After Cleaning)") + 
+  ylab("Mitochondrial Transcript (%)") + 
+  scale_y_continuous(limits = c(0, 10)) + # Zoom in since max is now <= 10
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    legend.position = "none",
+    axis.title.x = element_blank()
+  ) +
+  coord_fixed(ratio = 0.5)
+
+# 2. Total Cells Plot (Your existing code)
+meta_data <- combined_seurat@meta.data 
 p_cells <- ggplot(meta_data, aes(x = orig.ident, fill = orig.ident)) +
   geom_bar(color = "black") +
   geom_text(stat = 'count', aes(label = after_stat(count)), vjust = -0.5) +
   theme_classic() +
-  labs(title = "Total Cells per Sample (After cleaning)", y = "Number of Cells", x = NULL) +
+  labs(title = "Total Cells per Sample (After Cleaning)", y = "Number of Cells", x = NULL) +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
     legend.position = "none"
   ) +
-  coord_fixed(ratio = 0.001)  +
-  scale_y_continuous(limits = c(0, 5000)) + vertical_line
-p_cells
+  coord_fixed(ratio = 0.001) +
+  scale_y_continuous(limits = c(0, 4000)) + 
+  vertical_line
+
+# 3. Combine them vertically
+final_clean_plot <- p_mito_clean / p_cells
+final_clean_plot
 ```
+
 **Figure 4:** Number of cells after cleaning grouped by GSMs. The Y-axis indicate number of cells; The X-axis indicate GSMs; The vertical red dash line separate control (left side of red line), and tbi (right side of red line).
 
 # Normalization
+
+Differ from RNA-seq and bulk RNA-seq normalization we covered in class, because scRNA-seq data is `zero-inflated`, most of gene's counts is `0` in most of cells.
