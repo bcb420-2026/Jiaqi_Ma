@@ -3,25 +3,24 @@ title: "Assignment #1"
 author: "Jiaqi Ma"
 date: "2026-02-06"
 output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    df_print: paged
   html_notebook:
     toc: true
     toc_depth: 2
     toc_float: true
     code_folding: none
-  html_document:
-    toc: true
-    toc_depth: 2
-    df_print: paged
 bibliography: BCB420.bib
 link-citations: true
 ---
 
 # Data Download
 
-------------------------------------------------------------------------
-
 -   My choice of dataset is `GSE209552`.
--   Note: `GSE209552` is single nucleus RNA-seq (`snRNA-seq`), a varient of `scRNA-seq` that only sequence nucleus `RNA`.
+-   Note: `GSE209552` is single nucleus RNA-seq (`snRNA-seq`), a variant of `scRNA-seq` that only sequence nucleus `RNA`.
+-   Note: The scripts below frequently crashed R due to memory constrain on my laptop (16GB). I anticipate 32GB of RAM is needed to safely run scripts below.
 
 ```{r}
 # Define global constant
@@ -307,10 +306,24 @@ combined_seurat <- merge(
 )
 # Verify
 table(combined_seurat$Condition)
-
-# Delete `seurat_list` to free memory
-rm(seurat_list)
 ```
+
+## Free memory
+
+```{r}
+# Disconnect SQLite connection
+dbDisconnect(con)
+
+# Delete memory pointer from R
+rm(con)
+rm(seurat_list)
+rm(counts)
+rm(metadata)
+
+# # De allocate unused memory
+gc()
+```
+
 
 ## Data exploriation
 
@@ -614,6 +627,9 @@ library(tibble)
 # Collapse the split sample layers into a single unified 'counts' layer
 combined_seurat <- JoinLayers(combined_seurat)
 
+# Create a copy of un-normalized data for test purpose
+seurat_copy <- combined_seurat
+
 # Randomly sample exactly ONE cell per GSM (orig.ident)
 set.seed(42) 
 sampled_cells <- combined_seurat@meta.data %>%
@@ -718,25 +734,94 @@ Before filtering, the raw and normalized count are both inflated at zero due to 
 
 **Note :** X-axis is the `GSM` those cells sampled from, not `GSM` itself. So we can't infer sequence depth of `GSM` from **Figure 5**.
 
-## Z-score Normalization & dimention reduction
+## Free memory
+
+```{r}
+# Delete memory pointer from R
+rm(combined_seurat)
+rm(df_norm_filt)
+rm(df_norm_unfilt)
+rm(df_raw)
+rm(norm_matrix_filt)
+rm(norm_matrix_unfilt)
+rm(raw_counts_all)
+rm(raw_matrix)
+rm(sc_filtered)
+rm(sc_unfiltered)
+rm(meta_data)
+
+# De allocate unused memory
+gc()
+```
+
+
+## Z-score Normalization & Dimention reduction
 
 To avoid `curse of dimentionality`, meaning the distance between every data point is basically the same in high dimension data, dimension reduction is another common step to conduct before differential gene analysis.
 
-First perform `Z-score Normalization` to linearly shift the mean expression across cells at `0`, and standard deviation as `1`. This functionally is wrapped in `ScaleData()` in `Seurat`. By
+First perform `Z-score Normalization` to linearly shift the mean expression across cells at `0`, and standard deviation as `1`. This functionally is wrapped in `ScaleData()` in `Seurat`. For the sake of memory, only scale the top 2000 gene defined by seurat's `FindVariableFeatures()` function.
 
-```{r}
-all.genes <- rownames(combined_seurat_filtered)
-combined_seurat_filtered <- ScaleData(combined_seurat_filtered, features = all.genes)
+```{r, fig.width=14, fig.height=10, fig.align='center', dpi=300, out.width="100%"}
+# Find the top 2000 gene
+combined_seurat_filtered <- FindVariableFeatures(
+  combined_seurat_filtered, 
+  selection.method = "vst", 
+  nfeatures = 2000
+)
+
+# Z-score normalization
+combined_seurat_filtered <- ScaleData(combined_seurat_filtered)
+
+# Create a new mini-Seurat object based on the FILTERED dataset
+sc_scaled <- subset(combined_seurat_filtered, cells = sampled_cells)
+
+# 2. Extract Post-Scaling Data (Z-scores)
+# Use layer = "scale.data" to pull the matrix you just created
+scaled_matrix <- as.matrix(GetAssayData(sc_scaled, layer = "scale.data"))
+
+df_scaled <- as.data.frame(scaled_matrix) %>%
+  pivot_longer(cols = everything(), names_to = "Cell_ID", values_to = "Scaled_Expression") %>%
+  # NOTE: We do NOT filter > 0 here. Negative values are important Z-scores!
+  mutate(Sample = sc_scaled@meta.data[Cell_ID, "orig.ident"])
+
+# 3. Plot the Scaled Distribution
+p_scaled <- ggplot(df_scaled, aes(x = Sample, y = Scaled_Expression, fill = Sample)) +
+  geom_violin(scale = "width", color = "black", alpha = 0.8) + 
+  ggtitle("Post-Scaling: Z-scored Expression (1 Cell per GSM)") + 
+  ylab("Expression (Z-score)") + 
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    legend.position = "none", 
+    axis.title.x = element_blank()
+  ) + vertical_line
+
+p_scaled
 ```
+**Figure 6:** Expression level after Z-score normalization. Y-axis is the Z-score normalized expression level; X-axis is each single cell sampled from `GSM`; The vertical red dash line separate control (left side of red line), and tbi (right side of red line).
 
+Then perform principal Component Analysis (`PCA`), a linear dimension reduction and plot corresponding `MDS` plot using the first two principle component. The `PCA` is conduct via seurat's `RunPCA()` function. The default parameter crashed R on my machine, so for the sake of performance, only run `PCA` on the top 2000 variable genes and top 20 PCs.
+
+```{r, fig.width=14, fig.height=10, fig.align='center', dpi=300, out.width="100%"}
+# Run PCA
+combined_seurat_filtered <- RunPCA(combined_seurat_filtered, 
+                                   features = VariableFeatures(object = combined_seurat_filtered), 
+                                   npcs = 20, 
+                                   verbose = TRUE)
+
+# visualize MDS plot
+MDS_plot <- DimPlot(combined_seurat_filtered, reduction = "pca", group.by = "Condition")
+MDS_plot
+```
+**Figure 7:** MDS plot grouped by condition. Y-axis is the second PC; X-axis is the first PC; Each dot indicate a single cell.
+
+Note control and tbi group are clearly distinguished at four tip branched out from lower left bulk. Which implied transcriptional difference in the cells locate at this region.
 
 ## Obtain normalized dataframe
 
 `NormalizeData()`stored normalized counts in `data` layer. Simply call `Seurat::GetAssayData()` on `data` layer to obtain normalized counts, and convert to `data.frame` use `as.data.frame()`.
 
 After filter low quality cell at cleaning step, there are `21734` cells remain. After filter low expressed gene at normalization step, there are `25389` genes remain. Thus the shape of final resulting expression matrix is `25389 * 21734`
-
-
 
 ```{r}
 # extract normalized data
@@ -761,4 +846,4 @@ head(colnames(norm_matrix))
 
 The final result is in `dgCMatrix` instead of `data.frame` due to memory constrain. Convert to `data.frame` require additional `~5.4 GB` of RAM.
 
-# 
+# Differential gene expression
