@@ -599,7 +599,9 @@ final_clean_plot
 
 Differ from RNA-seq and bulk RNA-seq normalization we covered in class, `sc/snRNA-seq` data is `zero-inflated`, most of gene's counts is `0` in most of cells. Thus two of the method we covered in class, `TMM` and `RLE`, are not suitable for `sc/snRNA-seq` because they both assume most of the gene are not differentially expressed, `zero-inflated` counts data will yield inflated fold change when ever an algorithm is trying to calculate fold change ([Lytal et al, 2020](https://doi.org/10.3389/fgene.2020.00041)).
 
-On the other hands, the simple normalization by library size still work as intended and won't affect by inflated zeros and widely utilized in sing-cell transcriptome field as a baseline ([Ge et al, 2025](https://doi.org/10.1371/journal.pone.0335102), [Lytal et al, 2020](https://doi.org/10.3389/fgene.2020.00041), [Amezquita et al, 2019](https://doi.org/10.1038/s41592-019-0654-x)). In `Seurat`, it's wrapped as [NormalizeData()](https://satijalab.org/seurat/reference/normalizedata) function. Note the default `scale.factor` is set to be `10000` to account for `sc/snRNA-seq`'s relative small reads per cell compare with `bulk RNA-seq`.
+## Library size based Log-Normalization
+
+The simple normalization by library size still work as intended and won't affect by inflated zeros and widely utilized in sing-cell transcriptome field as a baseline ([Ge et al, 2025](https://doi.org/10.1371/journal.pone.0335102), [Lytal et al, 2020](https://doi.org/10.3389/fgene.2020.00041), [Amezquita et al, 2019](https://doi.org/10.1038/s41592-019-0654-x)). In `Seurat`, it's wrapped as [NormalizeData()](https://satijalab.org/seurat/reference/normalizedata) function. Note the default `scale.factor` is set to be `10000` to account for `sc/snRNA-seq`'s relative small reads per cell compare with `bulk RNA-seq`.
 
 For visualization, I choice first randomly sample one cell from each `GSM`, exclude genes with `0` counts, and plot the pre and post normalized counts on Y-axis, sampled cell on X-axis. The reason of no not plot normalized counts per `GSM` is because in `sc/snRNA-seq`, the counts is normalized by the total reads of a cell rather than `GSM`, thus plot normalized counts per `GSM` won't be so meaningful.
 
@@ -674,4 +676,36 @@ p_post_norm <- ggplot(df_norm, aes(x = Sample, y = Normalized_Count, fill = Samp
 final_norm_plot <- p_pre_norm / p_post_norm
 final_norm_plot
 ```
+
 **Figure 5:** Pre and post normalized counts per cell ( randomly sample 1 cell per `GSM`). The Y-axis of upper panel indicate raw counts; The Y-axis of bottom panel indicate Log-Normalized counts; The X-axis indicate the GSMs that cell is sampled from; The vertical red dash line separate control (left side of red line), and tbi (right side of red line).
+
+The normalized counts yield interesting vases shape, a flat and wide base with numbers of `beads` attached upon. The flat base is likely because of the `zero-inflated` nature of `sc/snRNA-seq`, even though I exclude all gene that has count == 0, most gene still have counts close to zero, following negative binomial distribution. However, I don't have a well constructed hypothesis to explain those `beads` attached, maybe because the raw input (raw counts) in discrete, the log-Normalized counts will also be discrete. The relative height of the base is reflecting sequence depth of those cell. When those counts close to zero were normalized by total read of a cell, the larger the total read, the smaller the normalized count. Thus the higher the base, the lower the sequence depth.
+
+**Note :** X-axis is the `GSM` those cells sampled from, not `GSM` itself. So we can't infer sequence depth of `GSM` from **Figure 5**.
+
+## Obtain normalized dataframe
+
+`NormalizeData()`stored normalized counts in `data` layer. Simply call `Seurat::GetAssayData()` on `data` layer to obtain normalized counts, and convert to `data.frame` use `as.data.frame()`.
+
+```{r}
+# extract normalized data
+norm_matrix <- GetAssayData(combined_seurat, layer = "data")
+
+# Check dimensions (Genes x Cells)
+dim(norm_matrix)
+
+# Check rowname
+head(rownames(norm_matrix))
+
+# Check colname
+head(colnames(norm_matrix))
+
+# convert to data.frame
+# Comment out to skip due to memory constrain
+# The script below prompt to allocate 5.4 GM of RAM
+# norm_df <- as.data.frame(norm_matrix)
+# Check dimensions (Genes x Cells)
+# dim(norm_df)
+```
+
+The final result is in `dgCMatrix` instead of `data.frame` due to memory constrain. Convert to `data.frame` require additional `~5.4 GB` of RAM.
