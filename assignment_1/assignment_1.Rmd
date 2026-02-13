@@ -599,11 +599,13 @@ final_clean_plot
 
 Differ from RNA-seq and bulk RNA-seq normalization we covered in class, `sc/snRNA-seq` data is `zero-inflated`, most of gene's counts is `0` in most of cells. Thus two of the method we covered in class, `TMM` and `RLE`, are not suitable for `sc/snRNA-seq` because they both assume most of the gene are not differentially expressed, `zero-inflated` counts data will yield inflated fold change when ever an algorithm is trying to calculate fold change ([Lytal et al, 2020](https://doi.org/10.3389/fgene.2020.00041)).
 
-## Library size based Log-Normalization
+## Library size based Log-Normalization & filter low expressed gene
 
 The simple normalization by library size still work as intended and won't affect by inflated zeros and widely utilized in sing-cell transcriptome field as a baseline ([Ge et al, 2025](https://doi.org/10.1371/journal.pone.0335102), [Lytal et al, 2020](https://doi.org/10.3389/fgene.2020.00041), [Amezquita et al, 2019](https://doi.org/10.1038/s41592-019-0654-x)). In `Seurat`, it's wrapped as [NormalizeData()](https://satijalab.org/seurat/reference/normalizedata) function. Note the default `scale.factor` is set to be `10000` to account for `sc/snRNA-seq`'s relative small reads per cell compare with `bulk RNA-seq`.
 
-For visualization, I choice first randomly sample one cell from each `GSM`, exclude genes with `0` counts, and plot the pre and post normalized counts on Y-axis, sampled cell on X-axis. The reason of no not plot normalized counts per `GSM` is because in `sc/snRNA-seq`, the counts is normalized by the total reads of a cell rather than `GSM`, thus plot normalized counts per `GSM` won't be so meaningful.
+For visualization, I choice first randomly sample one cell from each `GSM` and plot the pre and post normalized counts on Y-axis, sampled cell on X-axis. The reason of not plot normalized counts per `GSM` is because in `sc/snRNA-seq`, the counts is normalized by the total reads of a cell rather than `GSM`, thus plot normalized counts per `GSM` won't be so meaningful.
+
+In both [Seurat tutorial](https://satijalab.org/seurat/articles/pbmc3k_tutorial), and [Heumos et al, 2023](https://doi.org/10.1038/s41576-023-00586-w), they used the minimum number of cell expressing certain gene to remove low expressed gene instead of threaholding expression level like in `edgeR`. Thus I will also filter low expressed gene based on minimum number of cell.
 
 ```{r pre-post-norm-plot, fig.width=14, fig.height=10, fig.align='center', dpi=300, out.width="100%"}
 library(tidyr)
@@ -612,84 +614,133 @@ library(tibble)
 # Collapse the split sample layers into a single unified 'counts' layer
 combined_seurat <- JoinLayers(combined_seurat)
 
-# 1. Randomly sample exactly ONE cell per GSM (orig.ident)
-set.seed(42) # Set seed for reproducibility
+# Randomly sample exactly ONE cell per GSM (orig.ident)
+set.seed(42) 
 sampled_cells <- combined_seurat@meta.data %>%
   rownames_to_column("Cell_ID") %>%
   group_by(orig.ident) %>%
   sample_n(1) %>%
   pull(Cell_ID)
 
-# Subset the Seurat object to only contain these representative cells
-single_cell_seurat <- subset(combined_seurat, cells = sampled_cells)
+# Create a mini-Seurat object of just these cells for faster extraction
+sc_unfiltered <- subset(combined_seurat, cells = sampled_cells)
 
-# 2. Extract Pre-Normalization Data (Raw Counts)
-raw_matrix <- as.matrix(GetAssayData(single_cell_seurat, layer = "counts"))
+# ==========================================
+# PLOT 1: Pre-Normalization (Raw Counts)
+# ==========================================
+raw_matrix <- as.matrix(GetAssayData(sc_unfiltered, layer = "counts"))
 
 df_raw <- as.data.frame(raw_matrix) %>%
   pivot_longer(cols = everything(), names_to = "Cell_ID", values_to = "Count") %>%
-  filter(Count > 0) %>%
-  mutate(Sample = single_cell_seurat@meta.data[Cell_ID, "orig.ident"])
+  mutate(Sample = sc_unfiltered@meta.data[Cell_ID, "orig.ident"])
 
-# Plot Pre-Normalization
 p_pre_norm <- ggplot(df_raw, aes(x = Sample, y = Count, fill = Sample)) +
   geom_violin(scale = "width", color = "black", alpha = 0.8) + 
-  ggtitle("Pre-Normalization: 1 Cell per GSM (Raw Counts)") + 
-  ylab("Expression (Linear Counts)") +
+  ggtitle("1. Pre-Normalization: Raw Counts (Unfiltered)") + 
+  ylab("Expression (Linear)") +
   theme_classic() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "none",
-    axis.title.x = element_blank()
-  ) + vertical_line + 
-  scale_y_continuous(limits = c(0, 200))
+  theme(axis.text.x = element_blank(), legend.position = "none", axis.title.x = element_blank()) + 
+  vertical_line + 
+  coord_cartesian(ylim = c(0, 200))
 
-# 3. Normalization 
+
+# ==========================================
+# PLOT 2: Post-Normalization (Before Filtering)
+# ==========================================
+# Normalize the main dataset first
 combined_seurat <- NormalizeData(combined_seurat, normalization.method = "LogNormalize", scale.factor = 10000)
 
-# Re-subset to get the updated normalized data for those exact same cells
-single_cell_seurat <- subset(combined_seurat, cells = sampled_cells)
+# Update our mini-Seurat object to get the new normalized 'data' layer
+sc_unfiltered <- subset(combined_seurat, cells = sampled_cells)
 
-# 4. Extract Post-Normalization Data (Log-Normalized)
-# NormalizeData automatically outputs to a unified 'data' layer, so this is safe
-norm_matrix <- as.matrix(GetAssayData(single_cell_seurat, layer = "data"))
+norm_matrix_unfilt <- as.matrix(GetAssayData(sc_unfiltered, layer = "data"))
 
-df_norm <- as.data.frame(norm_matrix) %>%
+df_norm_unfilt <- as.data.frame(norm_matrix_unfilt) %>%
+  pivot_longer(cols = everything(), names_to = "Cell_ID", values_to = "Normalized_Count") %>%
+  mutate(Sample = sc_unfiltered@meta.data[Cell_ID, "orig.ident"])
+
+p_post_unfilt <- ggplot(df_norm_unfilt, aes(x = Sample, y = Normalized_Count, fill = Sample)) +
+  geom_violin(scale = "width", color = "black", alpha = 0.8) + 
+  ggtitle("2. Post-Normalization: Log-Normalized (Unfiltered)") + 
+  ylab("Expression (Log1p)") + 
+  theme_classic() +
+  theme(axis.text.x = element_blank(), legend.position = "none", axis.title.x = element_blank()) + 
+  vertical_line + 
+  coord_cartesian(ylim = c(0, 6))
+
+
+# ==========================================
+# PLOT 3: Post-Normalization (After Filtering)
+# ==========================================
+# Calculate frequencies and filter the main dataset
+raw_counts_all <- GetAssayData(combined_seurat, layer = "counts")
+cells_per_gene <- rowSums(raw_counts_all > 0)
+min_cells <- 10
+genes_to_keep <- names(which(cells_per_gene >= min_cells))
+
+message("Number of genes BEFORE filtering: ", nrow(raw_counts_all))
+message("Number of genes AFTER filtering (>= ", min_cells, " cells): ", length(genes_to_keep))
+message("Total genes removed: ", nrow(raw_counts_all) - length(genes_to_keep))
+
+# Subset the main object to remove noisy, low-expressed genes
+combined_seurat_filtered <- subset(combined_seurat, features = genes_to_keep)
+
+# Create a new mini-Seurat object based on the FILTERED dataset
+sc_filtered <- subset(combined_seurat_filtered, cells = sampled_cells)
+
+norm_matrix_filt <- as.matrix(GetAssayData(sc_filtered, layer = "data"))
+
+df_norm_filt <- as.data.frame(norm_matrix_filt) %>%
   pivot_longer(cols = everything(), names_to = "Cell_ID", values_to = "Normalized_Count") %>%
   filter(Normalized_Count > 0) %>%
-  mutate(Sample = single_cell_seurat@meta.data[Cell_ID, "orig.ident"])
+  mutate(Sample = sc_filtered@meta.data[Cell_ID, "orig.ident"])
 
-# Plot Post-Normalization
-p_post_norm <- ggplot(df_norm, aes(x = Sample, y = Normalized_Count, fill = Sample)) +
+p_post_filt <- ggplot(df_norm_filt, aes(x = Sample, y = Normalized_Count, fill = Sample)) +
   geom_violin(scale = "width", color = "black", alpha = 0.8) + 
-  ggtitle("Post-Normalization: 1 Cell per GSM (Log-Normalized)") + 
-  ylab("Expression (Log1p scale)") + 
+  ggtitle(paste0("3. Post-Normalization: Log-Normalized (Filtered >= ", min_cells, " cells)")) + 
+  ylab("Expression (Log1p)") + 
   theme_classic() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "none",
-    axis.title.x = element_blank()
-  ) + vertical_line + 
-  scale_y_continuous(limits = c(0, 6))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none", axis.title.x = element_blank()) + 
+  vertical_line + 
+  coord_cartesian(ylim = c(0, 6))
 
-# 5. Combine plots
-final_norm_plot <- p_pre_norm / p_post_norm
+# ==========================================
+# COMBINE PLOTS
+# ==========================================
+# Stack them vertically 
+final_norm_plot <- p_pre_norm / p_post_unfilt / p_post_filt
 final_norm_plot
 ```
 
-**Figure 5:** Pre and post normalized counts per cell ( randomly sample 1 cell per `GSM`). The Y-axis of upper panel indicate raw counts; The Y-axis of bottom panel indicate Log-Normalized counts; The X-axis indicate the GSMs that cell is sampled from; The vertical red dash line separate control (left side of red line), and tbi (right side of red line).
+**Figure 5:** Pre and post normalized counts per cell ( randomly sample 1 cell per `GSM`). The upper panel indicate the raw counts distribution of the randomly sampled cell; The middle panel indicate the normalized counts of the randomly sampled cell; The bottom panel indicate the distribution of normalized counts after exclude all genes that expressed in less than 10 cells; X-axis indicate the `GSMs` that cell is sampled from; The vertical red dash line separate control (left side of red line), and tbi (right side of red line).
 
-The normalized counts yield interesting vases shape, a flat and wide base with numbers of `beads` attached upon. The flat base is likely because of the `zero-inflated` nature of `sc/snRNA-seq`, even though I exclude all gene that has count == 0, most gene still have counts close to zero, following negative binomial distribution. However, I don't have a well constructed hypothesis to explain those `beads` attached, maybe because the raw input (raw counts) in discrete, the log-Normalized counts will also be discrete. The relative height of the base is reflecting sequence depth of those cell. When those counts close to zero were normalized by total read of a cell, the larger the total read, the smaller the normalized count. Thus the higher the base, the lower the sequence depth.
+Before filtering, the raw and normalized count are both inflated at zero due to the sparse nature of `sc/snRNA-seq`. After filtering, normalized counts yield interesting vases shape, a flat and wide base with numbers of `beads` attached upon. The flat base is likely because of the `zero-inflated` nature of `sc/snRNA-seq`, even though I exclude all gene that expressed in less than 10 cells, most gene still have counts close to zero, following negative binomial distribution. However, I don't have a well constructed hypothesis to explain those `beads` attached, maybe because the raw input (raw counts) in discrete, the log-Normalized counts will also be discrete. The relative height of the base is reflecting sequence depth of those cell. When those counts close to zero were normalized by total read of a cell, the larger the total read, the smaller the normalized count. Thus the higher the base, the lower the sequence depth.
 
 **Note :** X-axis is the `GSM` those cells sampled from, not `GSM` itself. So we can't infer sequence depth of `GSM` from **Figure 5**.
+
+## Z-score Normalization & dimention reduction
+
+To avoid `curse of dimentionality`, meaning the distance between every data point is basically the same in high dimension data, dimension reduction is another common step to conduct before differential gene analysis.
+
+First perform `Z-score Normalization` to linearly shift the mean expression across cells at `0`, and standard deviation as `1`. This functionally is wrapped in `ScaleData()` in `Seurat`. By
+
+```{r}
+all.genes <- rownames(combined_seurat_filtered)
+combined_seurat_filtered <- ScaleData(combined_seurat_filtered, features = all.genes)
+```
+
 
 ## Obtain normalized dataframe
 
 `NormalizeData()`stored normalized counts in `data` layer. Simply call `Seurat::GetAssayData()` on `data` layer to obtain normalized counts, and convert to `data.frame` use `as.data.frame()`.
 
+After filter low quality cell at cleaning step, there are `21734` cells remain. After filter low expressed gene at normalization step, there are `25389` genes remain. Thus the shape of final resulting expression matrix is `25389 * 21734`
+
+
+
 ```{r}
 # extract normalized data
-norm_matrix <- GetAssayData(combined_seurat, layer = "data")
+norm_matrix <- GetAssayData(combined_seurat_filtered, layer = "data")
 
 # Check dimensions (Genes x Cells)
 dim(norm_matrix)
@@ -709,3 +760,5 @@ head(colnames(norm_matrix))
 ```
 
 The final result is in `dgCMatrix` instead of `data.frame` due to memory constrain. Convert to `data.frame` require additional `~5.4 GB` of RAM.
+
+# 
